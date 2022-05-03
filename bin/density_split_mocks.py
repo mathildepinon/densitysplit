@@ -6,7 +6,7 @@ from mockfactory import EulerianLinearMock, LagrangianLinearMock, RandomBoxCatal
 
 import catalog_data
 import density_split
-from density_split_mocks_functions import generate_N_mocks, generate_N_densitySplit_CCF
+from density_split_mocks_functions import generate_N_mocks, generate_N_2PCF, generate_N_densitySplit_CCF
 
 # Set up logging
 setup_logging()
@@ -47,16 +47,28 @@ los = 'x'
 nmocks = 1000
 nmesh = 512
 
+# For RSD
+cosmology=fiducial.AbacusSummitBase()
+bg = cosmology.get_background()
+f = bg.Omega_m(catalog.redshift)**0.55
+
 # Generate mocks and save them
-#generate_N_mocks(catalog, nmocks=nmocks, nmesh=nmesh, 
-#                 bias=bias, 
-#                 output_dir=output_dir+'mocks/', mpi=True, overwrite=False)
+generate_N_mocks(catalog, nmocks=nmocks, nmesh=nmesh, 
+                 bias=bias, 
+                 rsd=True, los=los, f=f,
+                 output_dir=output_dir+'mocks_rsd/', mpi=True, overwrite=False)
 
-results_gg, results_dg = generate_N_densitySplit_CCF(catalog, nmocks=nmocks, nmesh=nmesh, 
-                                                     bias=bias, 
-                                                     cellsize=cellsize, resampler=resampler, nsplits=nsplits,
-                                                     edges=edges, los=los,
-                                                     save_each=True, output_dir=output_dir+'mocks/', mpi=False, overwrite=False)
+#results_gg, results_dg = generate_N_densitySplit_CCF(catalog, nmocks=nmocks, nmesh=nmesh, 
+#                                                     bias=bias, 
+#                                                     cellsize=cellsize, resampler=resampler, nsplits=nsplits,
+#                                                     edges=edges, los=los,
+#                                                     save_each=True, output_dir=output_dir+'mocks/', mpi=False, overwrite=False)
 
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_gg_CCF', results_gg)
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_dg_CCF', results_dg)
+#results = generate_N_2PCF(catalog, nmocks=nmocks, nmesh=nmesh,
+#                          bias=bias,
+#                          edges=edges, los=los,
+#                          save_each=True, output_dir=output_dir+'mocks/', mpi=False, overwrite=False)
+
+#np.save(output_dir+catalog.name+'_1000_mocks_2PCF', results)
+#np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_gg_CCF', results_gg)
+#np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_dg_CCF', results_dg)
