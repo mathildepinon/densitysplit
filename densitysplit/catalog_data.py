@@ -7,7 +7,7 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 
 from pypower import CatalogMesh
-import utils
+from . import utils
 
 class Data:
     """

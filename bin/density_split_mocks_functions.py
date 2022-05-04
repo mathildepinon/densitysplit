@@ -6,8 +6,7 @@ from cosmoprimo import *
 from pycorr import TwoPointCorrelationFunction, setup_logging
 from mockfactory import EulerianLinearMock, LagrangianLinearMock, RandomBoxCatalog, setup_logging
 
-import catalog_data
-import density_split
+from densitysplit import catalog_data, density_split
 
 # Set up logging
 setup_logging()
