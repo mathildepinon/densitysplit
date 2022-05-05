@@ -1,6 +1,7 @@
 import numpy as np
 import scipy
 from matplotlib import pyplot as plt
+import matplotlib as mpl
 
 from pycorr import TwoPointCorrelationFunction, TwoPointEstimator, NaturalTwoPointEstimator, project_to_multipoles, project_to_wp, utils, setup_logging
 from cosmoprimo import *
@@ -113,6 +114,9 @@ class PkModel:
     def set_default_params(self, **params):
         for key in params.keys():
             self.default_params_dict[key] = params[key]
+            
+    def set_s_lower_limit(self, s_lower_limit):
+        self.s_lower_limit = s_lower_limit
         
     def extract_split(self, split_index):
         xiell = self.xiell[split]
@@ -138,11 +142,15 @@ class PkModel:
                     model_params[key] = model_params['alpha_par']
                 if key == 'alpha_par' and 'alpha_perp' in model_params.keys():
                     model_params[key] = model_params['alpha_perp']
+                if key == 'sigma_par' and 'sigma_perp' in model_params.keys():
+                    model_params[key] = model_params['sigma_perp']
+                if key == 'sigma_perp' and 'sigma_par' in model_params.keys():
+                    model_params[key] = model_params['sigma_par']
                 else:
                     model_params[key] = self.default_params_dict[key]
 
         mu_AP, k_AP = AP_dilation(mu, self.k, model_params['alpha_par'], model_params['alpha_perp'])
-
+                
         pk_peak = pk_func(self.pk, k_AP) - pk_func(self.pk_smooth, k_AP)
         pk_model = bias_damping_func(mu_AP, k_AP, model_params['f'], model_params['b'], model_params['sigma_s']) * (pk_func(self.pk_smooth, k_AP) + BAO_damping_func(mu_AP, k_AP, model_params['sigma_par'], model_params['sigma_perp']) * pk_peak)
 
@@ -165,7 +173,7 @@ class PkModel:
 
         if pk_model_params is None:
             pk_model_params = self.default_params_dict
-        if broadband_coeffs is None:
+        if broadband_coeffs is None or len(broadband_coeffs)==0:
             broadband_coeffs = np.tile([0., 0., 0.], self.nells)
 
         pk_model = self._pk_model_poles(**pk_model_params)
@@ -210,7 +218,7 @@ class PkModel:
             res = self.model(s=s, pk_model_params=model_params_dict, broadband_coeffs=broadband_coeffs)
             return res
         
-        popt, pcov = scipy.optimize.curve_fit(fitting_func, s, xiell.flatten(), sigma=cov, p0=np.array(fit_params_init_values))
+        popt, pcov = scipy.optimize.curve_fit(fitting_func, s, xiell.flatten(), sigma=cov, p0=np.array(fit_params_init_values), absolute_sigma=True)
         
         popt_dict = {key: value for key, value in zip(model_params_names, popt[0:(nparams-ncoeffs)])}
         if ncoeffs > 0:
@@ -219,7 +227,8 @@ class PkModel:
         self.popt = popt
         self.pcov = pcov
         self.popt_dict = copy.deepcopy(popt_dict)
-        self.broadband_coeffs = popt_dict.pop('broadband_coeffs')
+        if 'broadband_coeffs' in popt_dict.keys():
+            self.broadband_coeffs = popt_dict.pop('broadband_coeffs')
         self.model_popt_dict = popt_dict
         
         print('Optimal parameters:')
@@ -232,56 +241,98 @@ class PkModel:
         print(np.diag(pcov)**0.5)
         
         self.fitted = True
+        self.chi_square()
         
         return self.popt_dict, pcov
     
-    def chi_square(self, per_dof=True):
-        if self.s_lower_limit is not None:
+    def chi_square(self, reduced=True):
+        if hasattr(self, 's_lower_limit') and self.s_lower_limit is not None:
             s, xiell, cov = truncate_xiell(self.s_lower_limit, self.sep, self.xiell, self.ells, self.cov)
         else:
             s = self.sep
             xiell = self.xiell
             cov = self.cov
             
-        model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs)
+        if self.fitted:
+            if hasattr(self, 'broadband_coeffs'):
+                model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs)
+            else:
+                model = self.model(s=s, pk_model_params=self.model_popt_dict)
+            ndof = len(s)*self.nells-len(self.popt)
+        else:
+            model = self.model(s=s, pk_model_params=self.default_params_dict)
+            ndof = len(s)*self.nells
+            
         chisq = compute_chisq(np.tile(s, self.nells), xiell.ravel(), cov, model)
         self.chisq = chisq
         
-        ndof = len(s)*self.nells-len(self.popt)
-        if per_dof:
-            chisq = chisq/ndof
+        rchisq = chisq/ndof
+        self.ndof = ndof
+        self.rchisq = rchisq
             
-        return chisq
-
+        if reduced:
+            return rchisq
+        else:
+            return chisq
     
-    def plot_model(self, fig=None, ax=None, plot_data=False):
+    def plot_model(self, fig=None, ax=None, plot_data=False, show_broadband=False, show_info=False):
         if ax is None:
             ax=plt.gca()
             
         s = self.sep
         if self.fitted:
-            model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs)
+            if hasattr(self, 'broadband_coeffs'):
+                model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs)
+                bbd = [broadband(s, self.broadband_coeffs[ill*3:(ill+1)*3]) for ill in range(self.nells)]
+            else:
+                model = self.model(s=s, pk_model_params=self.model_popt_dict)
+            params = self.model_popt_dict
         else:
             model = self.model()
-        
+            params = self.default_params_dict
+            bbd = 0
+                    
         if self.nells == 1:
-            ax.plot(s, s**2 * model, ls='--', color='C0', label='Model')
+            ax.plot(s, s**2 * model, ls='--', color='C0')
             if plot_data:
-                ax.errorbar(s, s**2 * self.xiell[0], s**2 * self.std[0], fmt='-', color='C0', label='Data')
+                ax.errorbar(s, s**2 * self.xiell[0], s**2 * self.std[0], fmt='-', color='C0')
+                # For legend
+                ax.errorbar([], [], [], linestyle='-', color='C0', label='Data')
+                ax.plot([], [], linestyle='--', color='C0', label='Model')
+                ax.legend()
             ax.set_ylabel(r'$s^2\xi_{}(s)$'.format(self.ells[0])+r'[$(\mathrm{Mpc}/h)^{2}$]')
+            if show_broadband and 'broadband_coeffs' in self.popt_dict.keys():
+                ax.plot(s, s**2 * bbd[0], ls='dotted', color='C0', label='Broadband')
+                ax.legend()
+                      
         else:
             for ill, ell in enumerate(self.ells):
-                ax.plot(s, s**2 * model[ill*len(s):(ill+1)*len(s)], ls='--', color='C'+str(ill), label = r'Model ($\ell = {:d}$)'.format(ell))
+                ax.plot(s, s**2 * model[ill*len(s):(ill+1)*len(s)], ls='--', color='C'+str(ill), label='$\ell = {:d}$'.format(ell))
                 if plot_data:
-                    ax.errorbar(s, s**2 * self.xiell[ill], s**2 * self.std[ill], fmt='-', color='C'+str(ill), label='Data ($\ell = {:d}$)'.format(ell))
+                    ax.errorbar(s, s**2 * self.xiell[ill], s**2 * self.std[ill], fmt='-', color='C'+str(ill))
+                if show_broadband:
+                    ax.plot(s, s**2 * bbd[ill], ls='dotted', color='C'+str(ill))
                 ax.set_ylabel(r'$s^{2}\xi(s)$ [$(\mathrm{Mpc}/h)^{2}$]')
-                ax.legend()
-        
+            if plot_data:
+                # For legend
+                ax.errorbar([], [], [], linestyle='-', color='black', label='Data')
+                ax.plot([],[], linestyle='--', color='black', label='Model')
+            if show_broadband and 'broadband_coeffs' in self.popt_dict.keys():
+                ax.plot([], [], linestyle='dotted', color='black', label='Broadband')
+            ax.legend()
+
         ax.set_xlabel('$s$ [$\mathrm{Mpc}/h$]')
         ax.grid(True)
         
         if hasattr(self, 's_lower_limit') and self.s_lower_limit is not None:
             ax.axvline(self.s_lower_limit, linestyle='dashed', color='r')
+            
+        if show_info:
+            plt.suptitle('Fit: $s$ > {:.0f} Mpc/$h$, '.format(self.s_lower_limit) 
+                         + r'$\chi^2_{r}$=' +'{:.2e}'.format(self.rchisq)
+                         + '\n' + '\n'.join([r'{}: {:.3e} $\pm$ {:.1e}'.format(pname, value, std) for pname, value, std in zip(params.keys(), params.values(), np.diag(self.pcov)**0.5)]),
+                         ha='left', x=0.1, y=0)
+
         
 
 
