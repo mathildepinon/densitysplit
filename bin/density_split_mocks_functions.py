@@ -103,7 +103,7 @@ def compute_densitySplit_CCF(data_density_splits, edges, los, save=False, name='
     return {'gg': results_gg, 'dg': results_dg}
 
 
-def generate_N_2PCF(catalog, nmocks, nmesh, bias, edges, los, save_each=False, output_dir='', mpi=False, overwrite=True):
+def generate_N_2PCF(catalog, nmocks, nmesh, bias, edges, los, rsd=False, save_each=False, output_dir='', mpi=False, overwrite=True):
     results = list()
     
     for i in range(nmocks):
@@ -122,8 +122,13 @@ def generate_N_2PCF(catalog, nmocks, nmesh, bias, edges, los, save_each=False, o
         
         if mock_catalog is not None:
             print('Computing correlation function...')
+            if rsd:
+                positions = mock_catalog.positions_rsd
+            else:
+                positions = mock_catalog.positions
+                
             result = TwoPointCorrelationFunction('smu', edges,
-                                                data_positions1=mock_catalog.positions,
+                                                data_positions1=positions,
                                                 boxsize=mock_catalog.boxsize,
                                                 engine='corrfunc', nthreads=128,
                                                 los = los)
