@@ -3,6 +3,7 @@ import scipy
 import scipy.stats
 from matplotlib import pyplot as plt
 import matplotlib as mpl
+import math
 
 from pycorr import TwoPointCorrelationFunction, TwoPointEstimator, NaturalTwoPointEstimator, project_to_multipoles, project_to_wp, utils, setup_logging
 from cosmoprimo import *
@@ -191,6 +192,8 @@ class PkModel:
         return broadbands + xi_model_poles
     
     def fit(self, fit_params_init, s_lower_limit=None, print_output=True, bao_peak=True):
+        fit_params_init_copy = copy.deepcopy(fit_params_init)
+        
         self.s_lower_limit = s_lower_limit
         if s_lower_limit is not None:
             s, xiell, cov = truncate_xiell(s_lower_limit, self.sep, self.xiell, self.ells, self.cov)
@@ -199,18 +202,18 @@ class PkModel:
             xiell = self.xiell
             cov = self.cov
             
-        fit_params_names = list(fit_params_init.keys())
+        fit_params_names = list(fit_params_init_copy.keys())
         
         if 'broadband_coeffs' in fit_params_names:
-            broadband_coeffs_init = fit_params_init.pop('broadband_coeffs')
+            broadband_coeffs_init = fit_params_init_copy.pop('broadband_coeffs')
             ncoeffs = len(broadband_coeffs_init)
-            fit_params_init_values = np.concatenate((list(fit_params_init.values()), broadband_coeffs_init))
-            fit_params_names = list(fit_params_init.keys())
+            fit_params_init_values = np.concatenate((list(fit_params_init_copy.values()), broadband_coeffs_init))
+            fit_params_names = list(fit_params_init_copy.keys())
             for i in range(len(broadband_coeffs_init)):
                 fit_params_names.append('broadband_coeff'+str(i))
         else:
             ncoeffs = 0
-            fit_params_init_values = list(fit_params_init.values())
+            fit_params_init_values = list(fit_params_init_copy.values())
             
         nparams = len(fit_params_names)
         model_params_names = fit_params_names[0:(nparams-ncoeffs)]
@@ -356,24 +359,35 @@ class PkModel:
                                                                     
                                                     
 def plot_likelihood(pk_model, param_name, param_values, free_params_init, s_lower_limit=None, without_peak=True, fig=None, ax=None):
+    pk_model.set_s_lower_limit(s_lower_limit)
+    default_params = pk_model.default_params_dict
+    
     if ax is None:
         ax=plt.gca()
 
     def compute_chi2(param_value, bao_peak=True):
-        pk_model.set_default_params(**{param_name: param_value})
-        # initialize parameters
+        param_dict = {param_name: param_value}
+        if param_name == 'alpha_par' or param_name == 'alpha_perp':
+            param_dict.update({'alpha_par': param_value, 'alpha_perp': param_value})
+        if param_name == 'sigma_par' or param_name == 'sigma_perp':
+            param_dict.update({'sigma_par': param_value, 'sigma_perp': param_value})
+    
+        pk_model.set_default_params(**param_dict)
         pk_model.fit(fit_params_init=free_params_init, s_lower_limit=s_lower_limit, print_output=False, bao_peak=bao_peak)
-        return pk_model.chi_square(reduced=False)
+        return pk_model.chisq
 
     if without_peak:
         chi2 = np.array([compute_chi2(param_value, bao_peak=False) for param_value in param_values])
     chi2_bao_peak = np.array([compute_chi2(param_value) for param_value in param_values])
-
+    
+    # Set default params back to their original value
+    pk_model.set_default_params(**default_params)
+    
     min_chi2 = np.min(chi2_bao_peak)
     conf_int = [scipy.stats.chi2.cdf(s**2, 1) for s in [1, 2, 3]]
     chi2_sigmas = [scipy.stats.chi2.ppf(ci, 1) for ci in conf_int]
 
-    a, b = np.argwhere(np.diff(np.sign(chi2_bao_peak - (min_chi2+chi2_sigmas[0])))).flatten()
+    param_limits_idx = np.argwhere(np.diff(np.sign(chi2_bao_peak - (min_chi2+chi2_sigmas[0])))).flatten()
 
     if without_peak:
         ax.plot(param_values, chi2, label='Without BAO peak', color='C1')
@@ -390,15 +404,18 @@ def plot_likelihood(pk_model, param_name, param_values, free_params_init, s_lowe
     ax.set_ylabel(r'$\chi^2$')
     ax.set_ylim(bottom=0)
     if without_peak:
-        ax.set_legend()
-    plt.suptitle(r'Values at $\chi^2 \pm 1\sigma$: {:.2f}, {:.2f}'.format(param_values[a], param_values[b]),
+        ax.legend()
+        
+    d = np.diff(param_values)[0]
+    ndigits = abs(int(math.log10(abs(d)))-1)
+
+    plt.suptitle(r'Values at $\chi^2 \pm 1\sigma$: ' + ', '.join([r'{0:.{1}f} $\pm$ {2:.1e}'.format(param_values[i], ndigits, d) for i in param_limits_idx]),
                  ha='left', x=0.1, y=0, size=14)
     
     if without_peak:
         return chi2, chi2_bao_peak
     else:
         return chi2_bao_peak
-
 
 
 
