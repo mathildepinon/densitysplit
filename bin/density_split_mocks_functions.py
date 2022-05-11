@@ -29,23 +29,25 @@ def generate_mock(nmesh, boxsize, boxcenter, seed, cosmology, nbar, z, bias, rsd
     data_rsd = mock.to_catalog()
     
     # Create Data instance
-    positions = data['Position'] % boxsize
-    positions_rsd = data_rsd['Position'] % boxsize
+    offset = boxcenter - boxsize/2.
+    positions = (data['Position'] - offset) % boxsize + offset
+    positions_rsd = (data_rsd['Position'] - offset) % boxsize + offset
             
     if mpi:
         positions = positions.gather()
+        positions_rsd = positions_rsd.gather()
         mock_catalog = None
         if mock.mpicomm.rank == 0:
             mock_catalog = catalog_data.Data(positions.T, z, boxsize, boxcenter, name=name)
             if rsd:
-                mock_catalog.set_rsd(positions_rsd=positions_rsd)
+                mock_catalog.set_rsd(positions_rsd=positions_rsd.T)
             if save:
                 mock_catalog.save(output_dir+name)
                 
     else:
         mock_catalog = catalog_data.Data(positions.T, z, boxsize, boxcenter, name=name)
         if rsd:
-            mock_catalog.set_rsd(positions_rsd=positions_rsd)
+            mock_catalog.set_rsd(positions_rsd=positions_rsd.T)
         if save:
             mock_catalog.save(output_dir+name)
     
@@ -74,9 +76,10 @@ def split_density(catalog, cellsize, resampler, nsplits, save=False, output_dir=
     return catalog_density
 
 
-def compute_densitySplit_CCF(data_density_splits, edges, los, save=False, name='mock'):
+def compute_densitySplit_CCF(data_density_splits, edges, los, save=False, output_dir='', name='mock'):
     
     split_samples = data_density_splits.sample_splits(size=data_density_splits.data.size, seed=0, update=False)
+    cellsize = data_density_splits.cellsize
     
     results_gg = list()
     results_dg = list()
@@ -97,8 +100,8 @@ def compute_densitySplit_CCF(data_density_splits, edges, los, save=False, name='
         results_dg.append(result_dg)
     
     if save:
-        np.save(output_dir+name+'_densitySplit_gg_CCFs', results_gg)
-        np.save(output_dir+name+'_densitySplit_dg_CCFs', results_dg)
+        np.save(output_dir+name+'_densitySplit_gg_CCFs_cellsize'+str(cellsize), results_gg)
+        np.save(output_dir+name+'_densitySplit_dg_CCFs_cellsize'+str(cellsize), results_dg)
     
     return {'gg': results_gg, 'dg': results_dg}
 

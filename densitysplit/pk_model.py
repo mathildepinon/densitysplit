@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 import matplotlib as mpl
 import math
 
+from iminuit import Minuit
 from pycorr import TwoPointCorrelationFunction, TwoPointEstimator, NaturalTwoPointEstimator, project_to_multipoles, project_to_wp, utils, setup_logging
 from cosmoprimo import *
 
@@ -171,7 +172,7 @@ class PkModel:
         poles = to_poles(pkmu, self.ells)
         return poles
 
-    def model(self, s=None, pk_model_params=None, broadband_coeffs=None, s_lower_limit=None, bao_peak=True):
+    def model(self, s=None, pk_model_params=None, broadband_coeffs=None, s_lower_limit=None, bao_peak=True, negative=False):
         if s is None:
             s = self.sep
         if s_lower_limit is not None:
@@ -188,10 +189,13 @@ class PkModel:
 
         broadbands = np.concatenate([broadband(s, broadband_coeffs[3*ill:3*(ill+1)]) for ill in range(self.nells)])
         xi_model_poles = np.concatenate([xi_model[ill](s) for ill in range(self.nells)])
-
-        return broadbands + xi_model_poles
+        
+        if negative:
+            return broadbands - xi_model_poles
+        else:
+            return broadbands + xi_model_poles
     
-    def fit(self, fit_params_init, s_lower_limit=None, print_output=True, bao_peak=True):
+    def fit(self, fit_params_init, s_lower_limit=None, print_output=True, bao_peak=True, negative=False, fit_method='scipy', minos=False):
         fit_params_init_copy = copy.deepcopy(fit_params_init)
         
         self.s_lower_limit = s_lower_limit
@@ -223,15 +227,40 @@ class PkModel:
             model_params_dict = {key: value for key, value in zip(model_params_names, model_params)}
             broadband_coeffs = fit_params[nparams-ncoeffs:]
             
-            res = self.model(s=s, pk_model_params=model_params_dict, broadband_coeffs=broadband_coeffs, bao_peak=bao_peak)
+            res = self.model(s=s, pk_model_params=model_params_dict, broadband_coeffs=broadband_coeffs, bao_peak=bao_peak, negative=negative)
             return res
         
-        popt, pcov = scipy.optimize.curve_fit(fitting_func, s, xiell.flatten(), sigma=cov, p0=np.array(fit_params_init_values), absolute_sigma=True)
+        # Function to minimize with iminuit
+        def iminuit_chisq(*fit_params):
+            model = fitting_func(s, *fit_params)
+            return compute_chisq(s, xiell.flatten(), cov, model)
         
+        if fit_method == 'iminuit':
+            m = Minuit(iminuit_chisq, *np.array(fit_params_init_values))
+            m.migrad()
+            imin = m.hesse()
+            
+            popt = list()
+            for param in imin.params:
+                popt.append(param.value)
+                
+            pcov = np.array(imin.covariance)
+            
+            if minos:
+                iminos = m.minos()
+                minos_errors = list()
+                for param in iminos.params:
+                    minos_errors.append(param.merror)
+            
+            self.minos = minos
+
+        if fit_method == 'scipy':
+            popt, pcov = scipy.optimize.curve_fit(fitting_func, s, xiell.flatten(), sigma=cov, p0=np.array(fit_params_init_values), absolute_sigma=True)
+
         popt_dict = {key: value for key, value in zip(model_params_names, popt[0:(nparams-ncoeffs)])}
         if ncoeffs > 0:
             popt_dict.update({'broadband_coeffs': popt[nparams-ncoeffs:]})
-        
+
         self.popt = popt
         self.pcov = pcov
         self.popt_dict = copy.deepcopy(popt_dict)
@@ -239,6 +268,13 @@ class PkModel:
             self.broadband_coeffs = popt_dict.pop('broadband_coeffs')
         self.model_popt_dict = popt_dict
         
+        if minos:
+            minos_err_dict = {key: value for key, value in zip(model_params_names, minos_errors[0:(nparams-ncoeffs)])}
+            if ncoeffs > 0:
+                minos_err_dict.update({'broadband_coeffs': minos_errors[nparams-ncoeffs:]})
+                
+            self.minos_errors = minos_err_dict
+
         if print_output:
             print('Optimal parameters:')
             print(self.popt_dict)
@@ -248,14 +284,19 @@ class PkModel:
 
             print('\nSigmas:')
             print(np.diag(pcov)**0.5)
-        
+            
+            if minos:
+                print('\nMinos errors:')
+                print(self.minos_errors)
+
         self.fitted = True
         self.bao_peak = bao_peak
+        self.negative = negative
         self.chi_square()
-        
+
         return self.popt_dict, pcov
     
-    def chi_square(self, reduced=True, bao_peak=True):
+    def chi_square(self, reduced=True, bao_peak=True, negative=False):
         if hasattr(self, 's_lower_limit') and self.s_lower_limit is not None:
             s, xiell, cov = truncate_xiell(self.s_lower_limit, self.sep, self.xiell, self.ells, self.cov)
         else:
@@ -265,12 +306,12 @@ class PkModel:
             
         if self.fitted:
             if hasattr(self, 'broadband_coeffs'):
-                model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs, bao_peak=self.bao_peak)
+                model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs, bao_peak=self.bao_peak, negative=self.negative)
             else:
-                model = self.model(s=s, pk_model_params=self.model_popt_dict, bao_peak=self.bao_peak)
+                model = self.model(s=s, pk_model_params=self.model_popt_dict, bao_peak=self.bao_peak, negative=self.negative)
             ndof = len(s)*self.nells-len(self.popt)
         else:
-            model = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak)
+            model = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=negative)
             ndof = len(s)*self.nells
             
         chisq = compute_chisq(np.tile(s, self.nells), xiell.ravel(), cov, model)
@@ -285,17 +326,17 @@ class PkModel:
         else:
             return chisq
             
-    def plot_model(self, fig=None, ax=None, plot_data=False, show_broadband=False, show_info=False, bao_peak=True):
+    def plot_model(self, fig=None, ax=None, plot_data=False, show_broadband=False, show_info=False, bao_peak=True, negative=False):
         if ax is None:
             ax=plt.gca()
             
         s = self.sep
         if self.fitted:
             if hasattr(self, 'broadband_coeffs'):
-                model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs, bao_peak=self.bao_peak)
+                model = self.model(s=s, pk_model_params=self.model_popt_dict, broadband_coeffs=self.broadband_coeffs, bao_peak=self.bao_peak, negative=self.negative)
                 bbd = [broadband(s, self.broadband_coeffs[ill*3:(ill+1)*3]) for ill in range(self.nells)]
             else:
-                model = self.model(s=s, pk_model_params=self.model_popt_dict, bao_peak=self.bao_peak)
+                model = self.model(s=s, pk_model_params=self.model_popt_dict, bao_peak=self.bao_peak, negative=self.negative)
             free_params = self.model_popt_dict
             fixed_params = {pname: value for pname, value in zip(self.default_params_dict.keys(), self.default_params_dict.values()) if pname not in free_params.keys()}
             if 'alpha_par' in free_params.keys() or 'alpha_perp' in free_params.keys():
@@ -305,7 +346,7 @@ class PkModel:
                 fixed_params.pop('sigma_par', None)
                 fixed_params.pop('sigma_perp', None)
         else:
-            model = self.model(bao_peak=bao_peak)
+            model = self.model(bao_peak=bao_peak, negative=negative)
             bbd = 0
             fixed_params = self.default_params_dict.keys()
                     
@@ -346,9 +387,16 @@ class PkModel:
             
         if show_info:
             if self.fitted:
+                if hasattr(self, 'minos') and self.minos:
+                    minos_errors_string = '\nMinos errors:\n'+'\n'.join([r'{}: err- {:.2e}, err+ {:.2e}'.format(self.params_labels[pname], merror[0], merror[1]) for pname, merror in zip(free_params.keys(), self.minos_errors.values())])
+                    
+                else:
+                    minos_errors_string = ''
+                    
                 plt.suptitle('Fit: $s$ > {:.0f} Mpc/$h$, '.format(self.s_lower_limit) 
                              + r'$\chi^2_{r}$=' +'{:.2e}'.format(self.rchisq)
                              + '\n\nFree parameters:\n' + '\n'.join([r'{}: {:.3e} $\pm$ {:.1e}'.format(self.params_labels[pname], value, std) for pname, value, std in zip(free_params.keys(), free_params.values(), np.diag(self.pcov)**0.5)])
+                             + minos_errors_string
                              + '\n\nFixed parameters:\n' + '\n'.join([r'{}: {:.1e}'.format(self.params_labels[pname], value) for pname, value in zip(fixed_params.keys(), fixed_params.values())]),
                              ha='left', x=0.1, y=0, size=14)
             else:
@@ -384,8 +432,10 @@ def plot_likelihood(pk_model, param_name, param_values, free_params_init, s_lowe
     pk_model.set_default_params(**default_params)
     
     min_chi2 = np.min(chi2_bao_peak)
+    nparams = len(pk_model.popt)
     conf_int = [scipy.stats.chi2.cdf(s**2, 1) for s in [1, 2, 3]]
-    chi2_sigmas = [scipy.stats.chi2.ppf(ci, 1) for ci in conf_int]
+    chi2_sigmas = [scipy.stats.chi2.ppf(ci, nparams) for ci in conf_int]
+    print(chi2_sigmas)
 
     param_limits_idx = np.argwhere(np.diff(np.sign(chi2_bao_peak - (min_chi2+chi2_sigmas[0])))).flatten()
 
@@ -402,7 +452,7 @@ def plot_likelihood(pk_model, param_name, param_values, free_params_init, s_lowe
     ax.text(param_lower_bound, min_chi2+chi2_sigmas[2]+0.1, r'3$\sigma$', color='C0')
     ax.set_xlabel(pk_model.params_labels[param_name])
     ax.set_ylabel(r'$\chi^2$')
-    ax.set_ylim(bottom=0)
+    ax.set_ylim(bottom=min_chi2)
     if without_peak:
         ax.legend()
         
