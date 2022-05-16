@@ -1,3 +1,5 @@
+#!/usr/bin/python
+import sys
 import numpy as np
 
 from cosmoprimo import *
@@ -5,12 +7,13 @@ from pycorr import TwoPointCorrelationFunction, setup_logging
 from mockfactory import EulerianLinearMock, LagrangianLinearMock, RandomBoxCatalog, setup_logging
 
 from densitysplit import catalog_data, density_split
-from bin.density_split_mocks_functions import generate_N_mocks, generate_N_2PCF, generate_N_densitySplit_CCF
+from bin.density_split_mocks_functions import generate_N_mocks, generate_N_2PCF, generate_N_densitySplit_CCF, generate_batch_densitySplit_CCF
 
 # Set up logging
 setup_logging()
 
-
+# Mock batch
+batch_index = int(sys.argv[1])
 
 # Data and output directories
 data_dir = '/feynman/work/dphp/mp270220/data/'
@@ -36,9 +39,10 @@ catalog.shift_boxcenter(-catalog.offset)
 # Density mesh
 cellsize = 10
 resampler = 'tsc'
-nsplits = 2
+nsplits = 3
 
 # Correlation function
+randoms_size = 4
 edges = (np.linspace(0., 150., 51), np.linspace(-1, 1, 201))
 los = 'x'
 
@@ -57,18 +61,28 @@ f = bg.Omega_m(catalog.redshift)**0.55
 #                 rsd=True, los=los, f=f,
 #                 output_dir=output_dir+'mocks_rsd/', mpi=True, overwrite=False)
 
-results_gg, results_dg = generate_N_densitySplit_CCF(catalog, nmocks=nmocks, nmesh=nmesh, 
-                                                     bias=bias, 
-                                                     cellsize=cellsize, resampler=resampler, nsplits=nsplits,
-                                                     edges=edges, los=los,
-                                                     save_each=True, output_dir=output_dir+'mocks/', mpi=False, overwrite=False)
-
 #results = generate_N_2PCF(catalog, nmocks=nmocks, nmesh=nmesh,
 #                          bias=bias,
 #                          edges=edges, los=los,
 #                          rsd = True,
 #                          save_each=True, output_dir=output_dir+'mocks_rsd/', mpi=False, overwrite=False)
 
+#results_gg, results_dg = generate_N_densitySplit_CCF(catalog, nmocks=nmocks, nmesh=nmesh, 
+#                                                     bias=bias, 
+#                                                     cellsize=cellsize, resampler=resampler, nsplits=nsplits,
+#                                                     edges=edges, los=los,
+#                                                     save_each=True, output_dir=output_dir+'mocks/', mpi=False, overwrite=False)
+
+results_rh = generate_batch_densitySplit_CCF(catalog, nmocks=nmocks, batch_size=10, batch_index=batch_index,
+                                                                                 nmesh=nmesh,
+                                                                                 bias=bias,
+                                                                                 cellsize=cellsize, resampler=resampler, nsplits=nsplits,
+                                                                                 randoms_size=randoms_size,
+                                                                                 edges=edges, los=los,
+                                                                                 nthreads=10,
+                                                                                 save_each=True, output_dir=output_dir+'mocks/', mpi=False, overwrite=False)
+
 #np.save(output_dir+catalog.name+'_1000_mocks_2PCF_rsd', results)
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_gg_CCF_cellsize'+str(cellsize), results_gg)
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_dg_CCF_cellsize'+str(cellsize), results_dg)
+#np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_hh_autoCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_batch'+str(batch_index), results_hh_auto)
+#np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_hh_crossCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_batch'+str(batch_index), results_hh_cross)
+np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_rh_CCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_batch'+str(batch_index), results_rh)

@@ -13,18 +13,35 @@ from . import utils
 
 
 
-def sample_splits(split_mesh, size, boxsize, offset, cellsize, seed=42):
+def sample_splits(density_mesh, resampler, split_bins, size, boxsize, offset, cellsize, seed=42):
     rng = np.random.RandomState(seed=seed)
     positions = [o + rng.uniform(0., 1., size)*b for o, b in zip((offset,)*3, (boxsize,)*3)]
-    nmesh = round(boxsize/cellsize)
-    positions_grid_indices = ((np.array(positions) - offset + cellsize/2.) // cellsize).astype(int) % nmesh
-
+#    nmesh = round(boxsize/cellsize)
+#    positions_grid_indices = ((np.array(positions) - offset + cellsize/2.) // cellsize).astype(int) % nmesh
+    shifted_positions = np.array(positions) - offset
+    densities = density_mesh.readout(shifted_positions.T, resampler=resampler)
+    
     split_samples = list()
 
-    for i in np.unique(split_mesh):
-        split = (split_mesh == i)
-        sample_in_split = split[tuple(positions_grid_indices.tolist())]
-        split_samples.append(np.array(positions).T[sample_in_split].T)
+#    for i in np.unique(split_mesh):
+#        split = (split_mesh == i)
+#        sample_in_split = split[tuple(positions_grid_indices.tolist())]
+        
+#        split_samples.append(np.array(positions).T[sample_in_split].T)
+        
+    nsplits = len(split_bins)-1
+    
+    for i in range(nsplits):
+        split_min = split_bins[i]
+        split_max = split_bins[i+1]
+        if i == 0:
+            split = (densities <= split_max)
+        elif i == nsplits-1:
+            split = (densities > split_min)
+        else:
+            split = np.logical_and((densities > split_min), (densities <= split_max))
+        
+        split_samples.append(np.array(positions).T[split].T)
 
     return split_samples
 
@@ -85,13 +102,15 @@ class DensitySplit:
         nmesh = mesh.nmesh[0]
 
         # Compute density contrast
-        density_mesh = np.array(painted_mesh/(norm/(nmesh**3))) - 1
+        density_mesh = painted_mesh/(norm/(nmesh**3)) - 1
 
         # Get positions of catalog particles in the catalog mesh
-        positions_grid_indices = ((np.array(positions) - self.offset + cellsize/2.) // cellsize).astype(int) % nmesh
+        #positions_grid_indices = ((np.array(positions) - self.offset + cellsize/2.) // cellsize).astype(int) % nmesh
 
         # Get densities at each point
-        self.data_densities = density_mesh[tuple(positions_grid_indices.tolist())]
+        #self.data_densities = density_mesh[tuple(positions_grid_indices.tolist())]
+        shifted_positions = positions - self.offset
+        self.data_densities = density_mesh.readout(shifted_positions.T, resampler=resampler)
 
         self.density_mesh = density_mesh
         self.cellsize = cellsize
@@ -136,7 +155,7 @@ class DensitySplit:
 
 
     def sample_splits(self, size, seed=42, update=True):
-        split_samples = sample_splits(self.split_mesh, size, self.boxsize, self.offset, self.cellsize, seed=seed)
+        split_samples = sample_splits(self.density_mesh, self.resampler, self.split_bins, size, self.boxsize, self.offset, self.cellsize, seed=seed)
         if update:
             self.split_samples = split_samples
         return split_samples

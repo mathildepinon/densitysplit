@@ -108,7 +108,17 @@ class PkModel:
         self.fitted = False
         
         if split:
-            self.std = np.array_split(np.array(np.array_split(np.diag(cov_split)**0.5, nells)), nsplits, axis=1)
+            self.nsplits = nsplits
+            self.std = np.array_split(np.array(np.array_split(np.diag(cov)**0.5, self.nells)), self.nsplits, axis=1)
+            self.default_params_dict = {'f': 0., 
+                                        'b1': 2., 'b2': 2.,
+                                        'alpha_par': 1., 'alpha_perp': 1., 
+                                        'sigma_par': 8., 'sigma_perp': 3.,
+                                        'sigma_s': 4.}
+            self.params_labels = {'f': r'$f$', 'b1': r'$b_{1}$', 'b2': r'$b_{2}$', 
+                                  'alpha_par': r'$\alpha_{\parallel}$', 'alpha_perp': r'$\alpha_{\perp}$', 
+                                  'sigma_par': r'$\Sigma_{\parallel}$', 'sigma_perp': r'$\Sigma_{\perp}$', 
+                                  'sigma_s': r'$\Sigma_{s}$'}
         else:
             self.std = np.array_split(np.diag(cov)**0.5, self.nells)
             
@@ -296,6 +306,92 @@ class PkModel:
 
         return self.popt_dict, pcov
     
+    def fit_splits(self, fit_params_init, s_lower_limit=None, print_output=True, bao_peak=True, fit_method='scipy', minos=False):
+        fit_params_init_copy = copy.deepcopy(fit_params_init)
+        
+        self.s_lower_limit = s_lower_limit
+        if s_lower_limit is not None:
+            s, xiell, cov = truncate_xiell(s_lower_limit, self.sep, self.xiell, self.ells, self.cov, split=True, nsplits=self.nsplits)
+        else:
+            s = self.sep
+            xiell = self.xiell
+            cov = self.cov
+            
+        ncoeffs1 = 0
+        ncoeffs2 = 0
+        ncoeffs = 0
+        fit_params_init_values = list(fit_params_init_copy.values())
+        fit_params_names = list(fit_params_init_copy.keys())
+        
+        if 'broadband_coeffs1' in fit_params_names:
+            broadband_coeffs1_init = fit_params_init_copy.pop('broadband_coeffs1')
+            broadband_coeffs2_init = fit_params_init_copy.pop('broadband_coeffs2', None)
+            ncoeffs1 = len(broadband_coeffs1_init)
+            ncoeffs = len(broadband_coeffs1_init)
+            fit_params_init_values = np.concatenate((list(fit_params_init_copy.values()), broadband_coeffs1_init))
+        if 'broadband_coeffs2' in fit_params_names:
+            ncoeffs2 = len(broadband_coeffs2_init)
+            ncoeffs += len(broadband_coeffs2_init)
+            fit_params_init_values = np.concatenate((fit_params_init_values, broadband_coeffs2_init))
+    
+            fit_params_names = list(fit_params_init_copy.keys())
+            for i in range(len(broadband_coeffs1_init)):
+                fit_params_names.append('broadband_coeff1_'+str(i))
+            for i in range(len(broadband_coeffs2_init)):
+                fit_params_names.append('broadband_coeff2_'+str(i))
+            
+        nparams = len(fit_params_names)
+        model_params_names = fit_params_names[0:(nparams-ncoeffs)]
+        
+        def fitting_func(s, *fit_params):
+            model_params = fit_params[0:(nparams-ncoeffs)]
+            model_params_dict = {key: value for key, value in zip(model_params_names, model_params)}
+            broadband_coeffs1 = fit_params[nparams-ncoeffs:nparams-ncoeffs2]
+            broadband_coeffs2 = fit_params[nparams-ncoeffs2:]
+            
+            model_params_dict1 = {key: val for key, val in model_params_dict.items() if key!='b2'}
+            model_params_dict1['b'] = model_params_dict1.pop('b1')
+            model_params_dict2 = {key: val for key, val in model_params_dict.items() if key!='b1'}
+            model_params_dict2['b'] = model_params_dict2.pop('b2')
+            res1 = self.model(s=s, pk_model_params=model_params_dict1, broadband_coeffs=broadband_coeffs1, bao_peak=bao_peak, negative=True)
+            res2 = self.model(s=s, pk_model_params=model_params_dict2, broadband_coeffs=broadband_coeffs2, bao_peak=bao_peak, negative=False)
+            return np.concatenate((res1, res2))
+        
+        if fit_method == 'scipy':
+            popt, pcov = scipy.optimize.curve_fit(fitting_func, s, np.array(xiell).flatten(), sigma=cov, p0=np.array(fit_params_init_values), absolute_sigma=True)
+
+        popt_dict = {key: value for key, value in zip(model_params_names, popt[0:(nparams-ncoeffs)])}
+        if ncoeffs1 > 0:
+            popt_dict.update({'broadband_coeffs1': popt[nparams-ncoeffs:nparams-ncoeffs2]})
+        if ncoeffs2 > 0:
+            popt_dict.update({'broadband_coeffs2': popt[nparams-ncoeffs2:]})
+
+        self.popt = popt
+        self.pcov = pcov
+        self.popt_dict = copy.deepcopy(popt_dict)
+        if 'broadband_coeffs1' in popt_dict.keys():
+            self.broadband_coeffs1 = popt_dict.pop('broadband_coeffs1')
+        if 'broadband_coeffs2' in popt_dict.keys():
+            self.broadband_coeffs2 = popt_dict.pop('broadband_coeffs2')
+        self.model_popt_dict = popt_dict
+        
+        if print_output:
+            print('Optimal parameters:')
+            print(self.popt_dict)
+
+            print('\nCovariance matrix:')
+            print(pcov)
+
+            print('\nSigmas:')
+            print(np.diag(pcov)**0.5)
+        
+        self.fitted = True
+        self.bao_peak = bao_peak
+        self.chi_square_splits()
+
+        return self.popt_dict, pcov
+
+    
     def chi_square(self, reduced=True, bao_peak=True, negative=False):
         if hasattr(self, 's_lower_limit') and self.s_lower_limit is not None:
             s, xiell, cov = truncate_xiell(self.s_lower_limit, self.sep, self.xiell, self.ells, self.cov)
@@ -315,6 +411,45 @@ class PkModel:
             ndof = len(s)*self.nells
             
         chisq = compute_chisq(np.tile(s, self.nells), xiell.ravel(), cov, model)
+        self.chisq = chisq
+        
+        rchisq = chisq/ndof
+        self.ndof = ndof
+        self.rchisq = rchisq
+            
+        if reduced:
+            return rchisq
+        else:
+            return chisq
+            
+    def chi_square_splits(self, reduced=True, bao_peak=True):
+        if hasattr(self, 's_lower_limit') and self.s_lower_limit is not None:
+            s, xiell, cov = truncate_xiell(self.s_lower_limit, self.sep, self.xiell, self.ells, self.cov, split=True, nsplits=self.nsplits)
+        else:
+            s = self.sep
+            xiell = self.xiell
+            cov = self.cov
+            
+        if self.fitted:
+            model_params_dict1 = {key: val for key, val in self.model_popt_dict.items() if key!='b2'}
+            model_params_dict1['b'] = model_params_dict1.pop('b1')
+            model_params_dict2 = {key: val for key, val in self.model_popt_dict.items() if key!='b1'}
+            model_params_dict2['b'] = model_params_dict2.pop('b2')
+                
+            if hasattr(self, 'broadband_coeffs1') and hasattr(self, 'broadband_coeffs2'):
+                model1 = self.model(s=s, pk_model_params=model_params_dict1, broadband_coeffs=self.broadband_coeffs1, bao_peak=self.bao_peak, negative=True)
+                model2 = self.model(s=s, pk_model_params=model_params_dict2, broadband_coeffs=self.broadband_coeffs2, bao_peak=self.bao_peak, negative=False)
+            else:
+                model1 = self.model(s=s, pk_model_params=model_params_dict1, bao_peak=self.bao_peak, negative=True)
+                model2 = self.model(s=s, pk_model_params=model_params_dict2, bao_peak=self.bao_peak, negative=False)
+            ndof = len(s)*self.nells*self.nsplits-len(self.popt)
+            
+        else:
+            model1 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=True)
+            model2 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=False)
+            ndof = len(s)*self.nells*self.nsplits
+            
+        chisq = compute_chisq(np.tile(s, self.nells*self.nsplits), np.array(xiell).flatten(), cov, np.concatenate((model1, model2)))
         self.chisq = chisq
         
         rchisq = chisq/ndof
@@ -395,7 +530,7 @@ class PkModel:
                     
                 plt.suptitle('Fit: $s$ > {:.0f} Mpc/$h$, '.format(self.s_lower_limit) 
                              + r'$\chi^2_{r}$=' +'{:.2e}'.format(self.rchisq)
-                             + '\n\nFree parameters:\n' + '\n'.join([r'{}: {:.3e} $\pm$ {:.1e}'.format(self.params_labels[pname], value, std) for pname, value, std in zip(free_params.keys(), free_params.values(), np.diag(self.pcov)**0.5)])
+                             + '\n\nFree parameters:\n' + '\n'.join([r'{}: {:.3e} $\pm$ {:.2e}'.format(self.params_labels[pname], value, std) for pname, value, std in zip(free_params.keys(), free_params.values(), np.diag(self.pcov)**0.5)])
                              + minos_errors_string
                              + '\n\nFixed parameters:\n' + '\n'.join([r'{}: {:.1e}'.format(self.params_labels[pname], value) for pname, value in zip(fixed_params.keys(), fixed_params.values())]),
                              ha='left', x=0.1, y=0, size=14)
@@ -404,7 +539,107 @@ class PkModel:
                              + r'$\chi^2_{r}$=' +'{:.2e}'.format(self.rchisq)
                              + '\n\nFixed parameters:\n' + '\n'.join([r'{}: {:.1e}'.format(self.params_labels[pname], value) for pname, value in zip(fixed_params.keys(), fixed_params.values())]),
                              ha='left', x=0.1, y=0, size=14)
-                                                                    
+ 
+
+    def plot_model_splits(self, fig=None, axes=None, plot_data=False, show_broadband=False, show_info=False, bao_peak=True):
+        if axes is None:
+            axes=[plt.gca() for i in range(self.nsplits)]
+            
+        s = self.sep
+        
+        if self.fitted:
+            model_params_dict1 = {key: val for key, val in self.model_popt_dict.items() if key!='b2'}
+            model_params_dict1['b'] = model_params_dict1.pop('b1')
+            model_params_dict2 = {key: val for key, val in self.model_popt_dict.items() if key!='b1'}
+            model_params_dict2['b'] = model_params_dict2.pop('b2')
+                
+            if hasattr(self, 'broadband_coeffs1') and hasattr(self, 'broadband_coeffs2'):
+                model1 = self.model(s=s, pk_model_params=model_params_dict1, broadband_coeffs=self.broadband_coeffs1, bao_peak=self.bao_peak, negative=True)
+                model2 = self.model(s=s, pk_model_params=model_params_dict2, broadband_coeffs=self.broadband_coeffs2, bao_peak=self.bao_peak, negative=False)
+                bbd1 = [broadband(s, self.broadband_coeffs1[ill*3:(ill+1)*3]) for ill in range(self.nells)]
+                bbd2 = [broadband(s, self.broadband_coeffs2[ill*3:(ill+1)*3]) for ill in range(self.nells)]
+            else:
+                model1 = self.model(s=s, pk_model_params=model_params_dict1, bao_peak=self.bao_peak, negative=True)
+                model2 = self.model(s=s, pk_model_params=model_params_dict2, bao_peak=self.bao_peak, negative=False)
+
+            free_params = self.model_popt_dict
+            fixed_params = {pname: value for pname, value in zip(self.default_params_dict.keys(), self.default_params_dict.values()) if pname not in free_params.keys()}
+            if 'alpha_par' in free_params.keys() or 'alpha_perp' in free_params.keys():
+                fixed_params.pop('alpha_par', None)
+                fixed_params.pop('alpha_perp', None)
+            if 'sigma_par' in free_params.keys() or 'sigma_perp' in free_params.keys():
+                fixed_params.pop('sigma_par', None)
+                fixed_params.pop('sigma_perp', None)
+        else:
+            model1 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=True)
+            model2 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=False)
+
+            bbd1 = 0
+            bbd2 = 0
+            fixed_params = self.default_params_dict.keys()
+            
+        models = [model1, model2]
+        bbds = [bbd1, bbd2]
+            
+        for split in range(self.nsplits):
+            ax = axes[split]
+            
+            if self.nells == 1:
+                ax.plot(s, s**2 * models[split], ls='--', color='C0')
+                if plot_data:
+                    ax.errorbar(s, s**2 * self.xiell[split][0], s**2 * self.std[split][0], fmt='-', color='C0')
+                    # For legend
+                    ax.errorbar([], [], [], linestyle='-', color='C0', label='Data')
+                    ax.plot([], [], linestyle='--', color='C0', label='Model')
+
+                ax.set_ylabel(r'$s^2\xi_{}(s)$'.format(self.ells[0])+r'[$(\mathrm{Mpc}/h)^{2}$]')
+                if show_broadband and 'broadband_coeffs1' in self.popt_dict.keys() and 'broadband_coeffs2' in self.popt_dict.keys():
+                    ax.plot(s, s**2 * bbds[split][0], ls='dotted', color='C0', label='Broadband')
+
+            else:
+                for ill, ell in enumerate(self.ells):
+                    ax.plot(s, s**2 * models[split][ill*len(s):(ill+1)*len(s)], ls='--', color='C'+str(ill), label='$\ell = {:d}$'.format(ell))
+                    if plot_data:
+                        ax.errorbar(s, s**2 * self.xiell[split][ill], s**2 * self.std[split][ill], fmt='-', color='C'+str(ill))
+                    if show_broadband:
+                        ax.plot(s, s**2 * bbds[split][ill], ls='dotted', color='C'+str(ill))
+                    ax.set_ylabel(r'$s^{2}\xi(s)$ [$(\mathrm{Mpc}/h)^{2}$]')
+                if plot_data:
+                    # For legend
+                    ax.errorbar([], [], [], linestyle='-', color='black', label='Data')
+                    ax.plot([],[], linestyle='--', color='black', label='Model')
+                if show_broadband and 'broadband_coeffs1' in self.popt_dict.keys() and 'broadband_coeffs2' in self.popt_dict.keys():
+                    ax.plot([], [], linestyle='dotted', color='black', label='Broadband')
+
+            ax.set_xlabel('$s$ [$\mathrm{Mpc}/h$]')
+            ax.grid(True)
+
+            if hasattr(self, 's_lower_limit') and self.s_lower_limit is not None:
+                ax.axvline(self.s_lower_limit, linestyle='dashed', color='r')
+                
+            ax.set_title('DS{}'.format(split+1))
+            
+        axes[1].legend()
+        if show_info:
+            if self.fitted:
+                if hasattr(self, 'minos') and self.minos:
+                    minos_errors_string = '\nMinos errors:\n'+'\n'.join([r'{}: err- {:.2e}, err+ {:.2e}'.format(self.params_labels[pname], merror[0], merror[1]) for pname, merror in zip(free_params.keys(), self.minos_errors.values())])
+                    
+                else:
+                    minos_errors_string = ''
+                    
+                plt.suptitle('Fit: $s$ > {:.0f} Mpc/$h$, '.format(self.s_lower_limit) 
+                             + r'$\chi^2_{r}$=' +'{:.2e}'.format(self.rchisq)
+                             + '\n\nFree parameters:\n' + '\n'.join([r'{}: {:.3e} $\pm$ {:.2e}'.format(self.params_labels[pname], value, std) for pname, value, std in zip(free_params.keys(), free_params.values(), np.diag(self.pcov)**0.5)])
+                             + minos_errors_string
+                             + '\n\nFixed parameters:\n' + '\n'.join([r'{}: {:.1e}'.format(self.params_labels[pname], value) for pname, value in zip(fixed_params.keys(), fixed_params.values())]),
+                             ha='left', x=0.1, y=0, size=14)
+            else:
+                plt.suptitle('Fit: $s$ > {:.0f} Mpc/$h$, '.format(self.s_lower_limit) 
+                             + r'$\chi^2_{r}$=' +'{:.2e}'.format(self.rchisq)
+                             + '\n\nFixed parameters:\n' + '\n'.join([r'{}: {:.1e}'.format(self.params_labels[pname], value) for pname, value in zip(fixed_params.keys(), fixed_params.values())]),
+                             ha='left', x=0.1, y=0, size=14)
+
                                                     
 def plot_likelihood(pk_model, param_name, param_values, free_params_init, s_lower_limit=None, without_peak=True, fig=None, ax=None):
     pk_model.set_s_lower_limit(s_lower_limit)

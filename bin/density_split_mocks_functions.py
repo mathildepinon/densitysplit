@@ -65,9 +65,9 @@ def generate_N_mocks(catalog, nmocks, nmesh, bias, rsd=False, los=None, f=None, 
                          mpi=mpi)
 
 
-def split_density(catalog, cellsize, resampler, nsplits, save=False, output_dir=''):
+def split_density(catalog, cellsize, resampler, nsplits, use_rsd=False, save=False, output_dir=''):
     catalog_density = density_split.DensitySplit(catalog)
-    catalog_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=False, use_weights=False)
+    catalog_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=use_rsd, use_weights=False)
     catalog_density.split_density(nsplits)
     
     if save:
@@ -76,34 +76,47 @@ def split_density(catalog, cellsize, resampler, nsplits, save=False, output_dir=
     return catalog_density
 
 
-def compute_densitySplit_CCF(data_density_splits, edges, los, save=False, output_dir='', name='mock'):
+def compute_densitySplit_CCF(data_density_splits, edges, los, use_rsd=False, save=False, output_dir='', name='mock', randoms_size=1, nthreads=128):
     
-    split_samples = data_density_splits.sample_splits(size=data_density_splits.data.size, seed=0, update=False)
+    split_samples = data_density_splits.sample_splits(size=randoms_size*data_density_splits.data.size, seed=0, update=False)
     cellsize = data_density_splits.cellsize
     
-    results_gg = list()
-    results_dg = list()
+#    results_hh_auto = list()
+#    results_hh_cross = list()
+    results_rh = list()
     
     for i in range(data_density_splits.nsplits):
-        result_gg = TwoPointCorrelationFunction('smu', edges,
-                                                data_positions1=data_density_splits.split_positions[i], data_positions2=data_density_splits.data.positions,
-                                                boxsize=data_density_splits.boxsize,
-                                                engine='corrfunc', nthreads=128,
-                                                los = los)
+#        result_hh_auto = TwoPointCorrelationFunction('smu', edges,
+#                                                data_positions1=data_density_splits.split_positions[i],
+#                                                boxsize=data_density_splits.boxsize,
+#                                                engine='corrfunc', nthreads=128,
+#                                                los = los)
         
-        result_dg = TwoPointCorrelationFunction('smu', edges,
+#        cross_indices = [j for j in range(data_density_splits.nsplits) if j!=i]
+#        cross_positions = np.concatenate([data_density_splits.split_positions[j] for j in cross_indices], axis=1)
+#        result_hh_cross = TwoPointCorrelationFunction('smu', edges,
+#                                                data_positions1=data_density_splits.split_positions[i], data_positions2=cross_positions,
+#                                                boxsize=data_density_splits.boxsize,
+#                                                engine='corrfunc', nthreads=nthreads,
+#                                                los = los)
+        
+        result_rh = TwoPointCorrelationFunction('smu', edges,
                                                 data_positions1=split_samples[i], data_positions2=data_density_splits.data.positions,
                                                 boxsize=data_density_splits.boxsize,
-                                                engine='corrfunc', nthreads=128,
+                                                engine='corrfunc', nthreads=nthreads,
                                                 los = los)
-        results_gg.append(result_gg)
-        results_dg.append(result_dg)
+        
+#        results_hh_auto.append(result_hh_auto)
+#        results_hh_cross.append(result_hh_cross)
+        results_rh.append(result_rh)
     
     if save:
-        np.save(output_dir+name+'_densitySplit_gg_CCFs_cellsize'+str(cellsize), results_gg)
-        np.save(output_dir+name+'_densitySplit_dg_CCFs_cellsize'+str(cellsize), results_dg)
+#        np.save(output_dir+name+'_densitySplit_hh_autoCFs_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size), results_hh_auto)
+#        np.save(output_dir+name+'_densitySplit_hh_crossCFs_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size), results_hh_cross)
+        np.save(output_dir+name+'_densitySplit_rh_CCFs_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size), results_rh)
     
-    return {'gg': results_gg, 'dg': results_dg}
+#    return {'hh_auto': results_hh_auto, 'hh_cross': results_hh_cross, 'rh': results_rh}
+    return results_rh
 
 
 def generate_N_2PCF(catalog, nmocks, nmesh, bias, edges, los, rsd=False, save_each=False, output_dir='', mpi=False, overwrite=True):
@@ -170,3 +183,43 @@ def generate_N_densitySplit_CCF(catalog, nmocks, nmesh, bias, cellsize, resample
             results_dg.append(result_dg)
         
     return results_gg, results_dg
+
+
+def generate_batch_densitySplit_CCF(catalog, nmocks, batch_size, batch_index, nmesh, bias, cellsize, resampler, nsplits, randoms_size, edges, los, nthreads=128, save_each=False, output_dir='', mpi=False, overwrite=True):
+    
+#    results_hh_auto = list()
+#    results_hh_cross = list()
+    results_rh = list()
+    
+    mocks_indices = range(batch_index*batch_size, (batch_index+1)*batch_size)
+    
+    for i in mocks_indices:
+        print('Mock '+str(i))
+        filename = catalog.name+'_mock'+str(i)
+        if exists(output_dir+filename+'.npy') and not overwrite:
+            print('Mock already exists. Loading mock...')
+            mock_catalog = catalog_data.Data.load(output_dir+filename+'.npy')
+        else:
+            print('Mock does not exist. Generating mock...')
+            mock_catalog = generate_mock(nmesh=nmesh, boxsize=catalog.boxsize, boxcenter=catalog.boxcenter, seed=i,
+                                         cosmology=fiducial.AbacusSummitBase(), nbar=catalog.size/catalog.boxsize**3,
+                                         z=catalog.redshift, bias=bias,
+                                         save=save_each, output_dir=output_dir, name=filename,
+                                         mpi=mpi)
+        
+        if mock_catalog is not None:
+            print('Computing density splits...')
+            mock_density = split_density(mock_catalog, cellsize, resampler, nsplits, save=False)
+            print('Computing correlation function...')
+            mock_CCFs = compute_densitySplit_CCF(mock_density, edges, los, randoms_size=randoms_size, nthreads=nthreads)
+#            result_hh_auto = mock_CCFs['hh_auto']
+#            result_hh_cross = mock_CCFs['hh_cross']
+#            result_rh = mock_CCFs['rh']
+            result_rh = mock_CCFs
+
+#            results_hh_auto.append(result_hh_auto)
+#            results_hh_cross.append(result_hh_cross)
+            results_rh.append(result_rh)
+        
+#    return results_hh_auto, results_hh_cross, results_rh
+    return results_rh

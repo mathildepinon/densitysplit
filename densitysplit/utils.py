@@ -51,7 +51,7 @@ def extract_subcovmatrix(s, cov, ells, nsplits, split_extract):
     return cov_extract
 
 
-def truncate_xiell(lower_s_limit, s, xiell, ells, cov):
+def truncate_xiell(lower_s_limit, s, xiell, ells, cov, split=False, nsplits=1):
     """
     Truncate separations, correlation function multipoles and covariance matrix above a given separation s_lower_limit.
     
@@ -65,29 +65,45 @@ def truncate_xiell(lower_s_limit, s, xiell, ells, cov):
     
     ells : int list, multipoles in xiell
     
-    cov : 2D array, covariance matric of the correlation function multipoles
+    cov : 2D array, covariance matrix of the correlation function multipoles
     """
     s_truncated = s[s>lower_s_limit]
-
-    xiell_truncated_list = list()
     ns = len(s)
+    
+    if split:
+        xiell_toret = list()
+        for split in range(nsplits):
+            xiell_truncated_list = list()
+            for ill, ell in enumerate(ells):
+                xiell_truncated_list.append(xiell[split][ill][s>lower_s_limit])
+                first_index = np.sum(np.logical_not(s>lower_s_limit))
 
-    for ill, ell in enumerate(ells):
-        xiell_truncated_list.append(xiell[ill][s>lower_s_limit])
-        first_index = np.sum(np.logical_not(s>lower_s_limit))
+            xiell_truncated = np.array(xiell_truncated_list)
+            xiell_toret.append(xiell_truncated)
+            
+        xiell_toret = np.array(xiell_toret)
+        
+    else:
+        nsplits = 1
+        
+        xiell_truncated_list = list()
+        for ill, ell in enumerate(ells):
+            xiell_truncated_list.append(xiell[ill][s>lower_s_limit])
 
-    xiell_truncated = np.array(xiell_truncated_list)
+        xiell_truncated = np.array(xiell_truncated_list)
+        xiell_toret = xiell_truncated
+
     
     # Truncate the whole covariance matrix
     ns_trunc = len(s_truncated)
     nells = len(ells)
-    cov_truncated_full = np.zeros((ns_trunc*nells, ns_trunc*nells))
+    cov_truncated_full = np.zeros((ns_trunc*nells*nsplits, ns_trunc*nells*nsplits))
 
-    for i in range(nells):
-        for j in range(nells):
+    for i in range(nells*nsplits):
+        for j in range(nells*nsplits):
             cov_truncated_full[i*ns_trunc:(i+1)*ns_trunc,j*ns_trunc:(j+1)*ns_trunc] = cov[(i+1)*ns-ns_trunc:(i+1)*ns,(j+1)*ns-ns_trunc:(j+1)*ns]
     
-    return s_truncated, xiell_truncated, cov_truncated_full
+    return s_truncated, xiell_toret, cov_truncated_full
 
 
 def compute_chisq(xdata, ydata, sigma, fitted_model):
