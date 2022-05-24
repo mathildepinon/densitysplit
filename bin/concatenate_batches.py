@@ -20,8 +20,8 @@ randoms_size = 4
 for i in range(100):
     batch_index = i
     
-    batch_results = np.load(output_dir+catalog_name+'_1000_mocks_densitySplit_hh_crossCF_cellsize'
-                            +str(cellsize)+'_randomsize'+str(randoms_size)+'_RSD_batch'+str(batch_index)+'.npy', 
+    batch_results = np.load(output_dir+catalog_name+'_1000_mocks_densitySplit_rh_CCF_cellsize'
+                            +str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index)+'.npy', 
                             allow_pickle=True)
 
 #    batch_results = np.load(output_dir+catalog_name+'_1000_mocks_2PCF_RSD_batch'+str(batch_index)+'.npy', 
@@ -30,5 +30,5 @@ for i in range(100):
     for res in batch_results:
         results_list.append(res)
         
-np.save(output_dir+catalog_name+'_1000_mocks_densitySplit_hh_crossCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_RSD_all', results_list)
+np.save(output_dir+catalog_name+'_1000_mocks_densitySplit_rh_CCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_all', results_list)
 #np.save(output_dir+catalog_name+'_1000_mocks_2PCF_RSD_all', results_list)
