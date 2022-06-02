@@ -188,7 +188,7 @@ class BAOModel:
         poles = to_poles(pkmu, self.ells)
         return poles
 
-    def model(self, s=None, model_params=None, negative=False):
+    def model(self, s=None, model_params=None, split=0, negative=False):
         if s is None:
             s = self.sep
 
@@ -199,7 +199,8 @@ class BAOModel:
 
         xi_model = xi_model_poles_interp(self.k, pk_model, self.ells)
 
-        broadbands = np.concatenate([broadband(s, self.broadband_coeffs[3*ill:3*(ill+1)]) for ill in range(self.nells)])
+        split_broadbands = np.array_split(self.broadband_coeffs, self.nsplits)
+        broadbands = np.concatenate([broadband(s, split_broadbands[split][3*ill:3*(ill+1)]) for ill in range(self.nells)])
         xi_model_poles = np.concatenate([xi_model[ill](s) for ill in range(self.nells)])
         
         if negative:
@@ -226,7 +227,7 @@ class BAOModel:
             split_params = copy.deepcopy(common_params)
             split_params.update(split_specific_params)
 
-            split_model = self.model(s=s, model_params=split_params, negative=self.signature[split])
+            split_model = self.model(s=s, model_params=split_params, split=split, negative=self.signature[split])
             split_models_list.append(split_model)
         
         return np.concatenate(split_models_list) 

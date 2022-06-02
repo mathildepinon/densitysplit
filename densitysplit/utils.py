@@ -2,6 +2,8 @@ import os
 import copy
 
 import numpy as np
+from matplotlib import pyplot as plt
+from matplotlib.colors import Normalize
 
 
 def get_slice_from_3D_points(points, cut_direction, cut_idx, cellsize, boxsize, offset, return_indices=False):
@@ -112,3 +114,29 @@ def compute_chisq(xdata, ydata, sigma, fitted_model):
     chisq = r.T @ np.linalg.inv(sigma) @ r
     
     return chisq
+
+
+def plot_corrcoef(cov, ells, s, nsplits):
+    stddev = np.sqrt(np.diag(cov).real)
+    corrcoef = cov / stddev[:, None] / stddev[None, :]
+
+    ns = len(s)
+    nells = len(ells)
+    
+    fig, lax = plt.subplots(nrows=nells*nsplits, ncols=nells*nsplits, sharex=False, sharey=False, figsize=(10, 8), squeeze=False)
+    fig.subplots_adjust(wspace=0.1, hspace=0.1)
+
+    norm = Normalize(vmin=corrcoef.min(), vmax=corrcoef.max())
+    for i in range(nells*nsplits):
+        for j in range(nells*nsplits):
+            ax = lax[nells*nsplits-1-i][j]
+            mesh = ax.pcolor(s, s, corrcoef[i*ns:(i+1)*ns,j*ns:(j+1)*ns].T, norm=norm, cmap=plt.get_cmap('coolwarm'))
+            if i>0: ax.xaxis.set_visible(False)
+            else: ax.set_xlabel(r'$s$  [Mpc/h]'
+                                #+'\n'+r'$\ell={}$'.format(ells[j//nsplits])
+                                +'\n''DS{}'.format(j//nells +1))
+            if j>0: ax.yaxis.set_visible(False)
+            else: ax.set_ylabel('DS{}'.format(i//nells +1)
+                                #+'\n'+r'$\ell={}$'.format(ells[i//nsplits])
+                                +'\n'+r'$s$  [Mpc/h]')
+    fig.colorbar(mesh, ax=lax, label=r'$r$')

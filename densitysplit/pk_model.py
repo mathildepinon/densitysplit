@@ -12,25 +12,6 @@ from cosmoprimo import *
 from .utils import *
 
 
-def pk_func(pk, k):
-    """
-    Function that evaluates a power spectrum interpolator pk at vector of scales k
-    
-    Parameters
-    ----------
-    pk : PowerSpectrumInterpolator1D
-        Power spectrum interpolator
-    k : array
-        Values of k at which the power spectrum must be computed
-        
-    Returns
-    -------
-    array
-        Power spectrum at each value of k
-    """
-    return pk(k=k)
-
-
 def BAO_damping_func(mu, k, sigma_par, sigma_perp):
     """
     Computes BAO damping factor in power spectrum model
@@ -111,11 +92,11 @@ class PkModel:
             self.nsplits = nsplits
             self.std = np.array_split(np.array(np.array_split(np.diag(cov)**0.5, self.nells)), self.nsplits, axis=1)
             self.default_params_dict = {'f': 0., 
-                                        'b1': 2., 'b2': 2.,
+                                        'b1': 2., 'b2': 2., 'b3': 2.,
                                         'alpha_par': 1., 'alpha_perp': 1., 
                                         'sigma_par': 8., 'sigma_perp': 3.,
                                         'sigma_s': 4.}
-            self.params_labels = {'f': r'$f$', 'b1': r'$b_{1}$', 'b2': r'$b_{2}$', 
+            self.params_labels = {'f': r'$f$', 'b1': r'$b_{2}$', 'b2': r'$b_{2}$', 'b3': r'$b_{3}$',
                                   'alpha_par': r'$\alpha_{\parallel}$', 'alpha_perp': r'$\alpha_{\perp}$', 
                                   'sigma_par': r'$\Sigma_{\parallel}$', 'sigma_perp': r'$\Sigma_{\perp}$', 
                                   'sigma_s': r'$\Sigma_{s}$'}
@@ -154,22 +135,22 @@ class PkModel:
             if not key in model_params.keys():
                 if key == 'alpha_perp' and 'alpha_par' in model_params.keys():
                     model_params[key] = model_params['alpha_par']
-                if key == 'alpha_par' and 'alpha_perp' in model_params.keys():
-                    model_params[key] = model_params['alpha_perp']
-                if key == 'sigma_par' and 'sigma_perp' in model_params.keys():
-                    model_params[key] = model_params['sigma_perp']
-                if key == 'sigma_perp' and 'sigma_par' in model_params.keys():
+#                if key == 'alpha_par' and 'alpha_perp' in model_params.keys():
+#                    model_params[key] = model_params['alpha_perp']
+                elif key == 'sigma_perp' and 'sigma_par' in model_params.keys():
                     model_params[key] = model_params['sigma_par']
+#                if key == 'sigma_perp' and 'sigma_par' in model_params.keys():
+#                    model_params[key] = model_params['sigma_par']
                 else:
                     model_params[key] = self.default_params_dict[key]
-
+ 
         mu_AP, k_AP = AP_dilation(mu, self.k, model_params['alpha_par'], model_params['alpha_perp'])
                 
         if bao_peak:
-            pk_peak = pk_func(self.pk, k_AP) - pk_func(self.pk_smooth, k_AP)
+            pk_peak = self.pk(k=k_AP) - self.pk_smooth(k=k_AP)
         else:
             pk_peak = 0
-        pk_model = bias_damping_func(mu_AP, k_AP, model_params['f'], model_params['b'], model_params['sigma_s']) * (pk_func(self.pk_smooth, k_AP) + BAO_damping_func(mu_AP, k_AP, model_params['sigma_par'], model_params['sigma_perp']) * pk_peak)
+        pk_model = bias_damping_func(mu_AP, k_AP, model_params['f'], model_params['b'], model_params['sigma_s']) * (self.pk_smooth(k=k_AP) + BAO_damping_func(mu_AP, k_AP, model_params['sigma_par'], model_params['sigma_perp']) * pk_peak)
 
         return pk_model/(model_params['alpha_par']*model_params['alpha_perp']**2)
     
@@ -319,6 +300,7 @@ class PkModel:
             
         ncoeffs1 = 0
         ncoeffs2 = 0
+        ncoeffs3 = 0
         ncoeffs = 0
         fit_params_init_values = list(fit_params_init_copy.values())
         fit_params_names = list(fit_params_init_copy.keys())
@@ -326,6 +308,7 @@ class PkModel:
         if 'broadband_coeffs1' in fit_params_names:
             broadband_coeffs1_init = fit_params_init_copy.pop('broadband_coeffs1')
             broadband_coeffs2_init = fit_params_init_copy.pop('broadband_coeffs2', None)
+            broadband_coeffs3_init = fit_params_init_copy.pop('broadband_coeffs3', None)
             ncoeffs1 = len(broadband_coeffs1_init)
             ncoeffs = len(broadband_coeffs1_init)
             fit_params_init_values = np.concatenate((list(fit_params_init_copy.values()), broadband_coeffs1_init))
@@ -333,12 +316,18 @@ class PkModel:
             ncoeffs2 = len(broadband_coeffs2_init)
             ncoeffs += len(broadband_coeffs2_init)
             fit_params_init_values = np.concatenate((fit_params_init_values, broadband_coeffs2_init))
+        if 'broadband_coeffs3' in fit_params_names:
+            ncoeffs3 = len(broadband_coeffs3_init)
+            ncoeffs += len(broadband_coeffs3_init)
+            fit_params_init_values = np.concatenate((fit_params_init_values, broadband_coeffs3_init))
     
             fit_params_names = list(fit_params_init_copy.keys())
             for i in range(len(broadband_coeffs1_init)):
                 fit_params_names.append('broadband_coeff1_'+str(i))
             for i in range(len(broadband_coeffs2_init)):
                 fit_params_names.append('broadband_coeff2_'+str(i))
+            for i in range(len(broadband_coeffs3_init)):
+                fit_params_names.append('broadband_coeff3_'+str(i))
             
         nparams = len(fit_params_names)
         model_params_names = fit_params_names[0:(nparams-ncoeffs)]
@@ -346,25 +335,38 @@ class PkModel:
         def fitting_func(s, *fit_params):
             model_params = fit_params[0:(nparams-ncoeffs)]
             model_params_dict = {key: value for key, value in zip(model_params_names, model_params)}
-            broadband_coeffs1 = fit_params[nparams-ncoeffs:nparams-ncoeffs2]
-            broadband_coeffs2 = fit_params[nparams-ncoeffs2:]
+            broadband_coeffs1 = fit_params[nparams-ncoeffs:nparams-ncoeffs2-ncoeffs3]
+            broadband_coeffs2 = fit_params[nparams-ncoeffs2-ncoeffs3:nparams-ncoeffs3]
+            broadband_coeffs3 = fit_params[nparams-ncoeffs3:]
             
-            model_params_dict1 = {key: val for key, val in model_params_dict.items() if key!='b2'}
+            model_params_dict1 = {key: val for key, val in model_params_dict.items() if key not in ['b2', 'b3']}
             model_params_dict1['b'] = model_params_dict1.pop('b1')
-            model_params_dict2 = {key: val for key, val in model_params_dict.items() if key!='b1'}
+            model_params_dict2 = {key: val for key, val in model_params_dict.items() if key not in ['b1', 'b3']}
             model_params_dict2['b'] = model_params_dict2.pop('b2')
+            model_params_dict3 = {key: val for key, val in model_params_dict.items() if key not in ['b1', 'b2']}
+            model_params_dict3['b'] = model_params_dict3.pop('b3')
             res1 = self.model(s=s, pk_model_params=model_params_dict1, broadband_coeffs=broadband_coeffs1, bao_peak=bao_peak, negative=True)
             res2 = self.model(s=s, pk_model_params=model_params_dict2, broadband_coeffs=broadband_coeffs2, bao_peak=bao_peak, negative=False)
-            return np.concatenate((res1, res2))
+            res3 = self.model(s=s, pk_model_params=model_params_dict3, broadband_coeffs=broadband_coeffs3, bao_peak=bao_peak, negative=False)
+            return np.concatenate((res1, res2, res3))
         
         if fit_method == 'scipy':
-            popt, pcov = scipy.optimize.curve_fit(fitting_func, s, np.array(xiell).flatten(), sigma=cov, p0=np.array(fit_params_init_values), absolute_sigma=True)
+            bound_inf = np.array([1., 1., 1., 0.5, 0.5, 3, 3, 
+                                  -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf,
+                                  -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf, -np.inf])
+            bound_sup = np.array([3, 3, 3, 1.5, 1.5, 15, 15, 
+                                  np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf,
+                                  np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
+            popt, pcov = scipy.optimize.curve_fit(fitting_func, s, np.array(xiell).flatten(), sigma=cov, p0=np.array(fit_params_init_values), absolute_sigma=True) #,
+                                                  #bounds=(bound_inf, bound_sup))
 
         popt_dict = {key: value for key, value in zip(model_params_names, popt[0:(nparams-ncoeffs)])}
         if ncoeffs1 > 0:
-            popt_dict.update({'broadband_coeffs1': popt[nparams-ncoeffs:nparams-ncoeffs2]})
+            popt_dict.update({'broadband_coeffs1': popt[nparams-ncoeffs:nparams-ncoeffs2-ncoeffs3]})
         if ncoeffs2 > 0:
-            popt_dict.update({'broadband_coeffs2': popt[nparams-ncoeffs2:]})
+            popt_dict.update({'broadband_coeffs2': popt[nparams-ncoeffs2-ncoeffs3:nparams-ncoeffs3]})    
+        if ncoeffs3 > 0:
+            popt_dict.update({'broadband_coeffs3': popt[nparams-ncoeffs3:]})
 
         self.popt = popt
         self.pcov = pcov
@@ -373,6 +375,8 @@ class PkModel:
             self.broadband_coeffs1 = popt_dict.pop('broadband_coeffs1')
         if 'broadband_coeffs2' in popt_dict.keys():
             self.broadband_coeffs2 = popt_dict.pop('broadband_coeffs2')
+        if 'broadband_coeffs3' in popt_dict.keys():
+            self.broadband_coeffs3 = popt_dict.pop('broadband_coeffs3')
         self.model_popt_dict = popt_dict
         
         if print_output:
@@ -431,25 +435,30 @@ class PkModel:
             cov = self.cov
             
         if self.fitted:
-            model_params_dict1 = {key: val for key, val in self.model_popt_dict.items() if key!='b2'}
+            model_params_dict1 = {key: val for key, val in self.model_popt_dict.items() if key not in ['b2', 'b3']}
             model_params_dict1['b'] = model_params_dict1.pop('b1')
-            model_params_dict2 = {key: val for key, val in self.model_popt_dict.items() if key!='b1'}
+            model_params_dict2 = {key: val for key, val in self.model_popt_dict.items() if key not in ['b1', 'b3']}
             model_params_dict2['b'] = model_params_dict2.pop('b2')
+            model_params_dict3 = {key: val for key, val in self.model_popt_dict.items() if key not in ['b1', 'b2']}
+            model_params_dict3['b'] = model_params_dict3.pop('b3')
                 
-            if hasattr(self, 'broadband_coeffs1') and hasattr(self, 'broadband_coeffs2'):
+            if hasattr(self, 'broadband_coeffs1') and hasattr(self, 'broadband_coeffs2') and hasattr(self, 'broadband_coeffs3'):
                 model1 = self.model(s=s, pk_model_params=model_params_dict1, broadband_coeffs=self.broadband_coeffs1, bao_peak=self.bao_peak, negative=True)
                 model2 = self.model(s=s, pk_model_params=model_params_dict2, broadband_coeffs=self.broadband_coeffs2, bao_peak=self.bao_peak, negative=False)
+                model3 = self.model(s=s, pk_model_params=model_params_dict3, broadband_coeffs=self.broadband_coeffs3, bao_peak=self.bao_peak, negative=False)
             else:
                 model1 = self.model(s=s, pk_model_params=model_params_dict1, bao_peak=self.bao_peak, negative=True)
                 model2 = self.model(s=s, pk_model_params=model_params_dict2, bao_peak=self.bao_peak, negative=False)
+                model3 = self.model(s=s, pk_model_params=model_params_dict3, bao_peak=self.bao_peak, negative=False)
             ndof = len(s)*self.nells*self.nsplits-len(self.popt)
             
         else:
             model1 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=True)
             model2 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=False)
+            model3 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=False)
             ndof = len(s)*self.nells*self.nsplits
             
-        chisq = compute_chisq(np.tile(s, self.nells*self.nsplits), np.array(xiell).flatten(), cov, np.concatenate((model1, model2)))
+        chisq = compute_chisq(np.tile(s, self.nells*self.nsplits), np.array(xiell).flatten(), cov, np.concatenate((model1, model2, model3)))
         self.chisq = chisq
         
         rchisq = chisq/ndof
@@ -505,7 +514,7 @@ class PkModel:
                     ax.errorbar(s, s**2 * self.xiell[ill], s**2 * self.std[ill], fmt='-', color='C'+str(ill))
                 if show_broadband:
                     ax.plot(s, s**2 * bbd[ill], ls='dotted', color='C'+str(ill))
-                ax.set_ylabel(r'$s^{2}\xi(s)$ [$(\mathrm{Mpc}/h)^{2}$]')
+                ax.set_ylabel(r'$s^{2}\xi_{\ell}(s)$ [$(\mathrm{Mpc}/h)^{2}$]')
             if plot_data:
                 # For legend
                 ax.errorbar([], [], [], linestyle='-', color='black', label='Data')
@@ -548,19 +557,24 @@ class PkModel:
         s = self.sep
         
         if self.fitted:
-            model_params_dict1 = {key: val for key, val in self.model_popt_dict.items() if key!='b2'}
+            model_params_dict1 = {key: val for key, val in self.model_popt_dict.items() if key not in ['b2', 'b3']}
             model_params_dict1['b'] = model_params_dict1.pop('b1')
-            model_params_dict2 = {key: val for key, val in self.model_popt_dict.items() if key!='b1'}
+            model_params_dict2 = {key: val for key, val in self.model_popt_dict.items() if key not in ['b1', 'b3']}
             model_params_dict2['b'] = model_params_dict2.pop('b2')
+            model_params_dict3 = {key: val for key, val in self.model_popt_dict.items() if key not in ['b1', 'b2']}
+            model_params_dict3['b'] = model_params_dict3.pop('b3')
                 
-            if hasattr(self, 'broadband_coeffs1') and hasattr(self, 'broadband_coeffs2'):
+            if hasattr(self, 'broadband_coeffs1') and hasattr(self, 'broadband_coeffs2') and hasattr(self, 'broadband_coeffs3'):
                 model1 = self.model(s=s, pk_model_params=model_params_dict1, broadband_coeffs=self.broadband_coeffs1, bao_peak=self.bao_peak, negative=True)
                 model2 = self.model(s=s, pk_model_params=model_params_dict2, broadband_coeffs=self.broadband_coeffs2, bao_peak=self.bao_peak, negative=False)
+                model3 = self.model(s=s, pk_model_params=model_params_dict3, broadband_coeffs=self.broadband_coeffs3, bao_peak=self.bao_peak, negative=False)
                 bbd1 = [broadband(s, self.broadband_coeffs1[ill*3:(ill+1)*3]) for ill in range(self.nells)]
                 bbd2 = [broadband(s, self.broadband_coeffs2[ill*3:(ill+1)*3]) for ill in range(self.nells)]
+                bbd3 = [broadband(s, self.broadband_coeffs3[ill*3:(ill+1)*3]) for ill in range(self.nells)]
             else:
                 model1 = self.model(s=s, pk_model_params=model_params_dict1, bao_peak=self.bao_peak, negative=True)
                 model2 = self.model(s=s, pk_model_params=model_params_dict2, bao_peak=self.bao_peak, negative=False)
+                model3 = self.model(s=s, pk_model_params=model_params_dict3, bao_peak=self.bao_peak, negative=False)
 
             free_params = self.model_popt_dict
             fixed_params = {pname: value for pname, value in zip(self.default_params_dict.keys(), self.default_params_dict.values()) if pname not in free_params.keys()}
@@ -573,13 +587,15 @@ class PkModel:
         else:
             model1 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=True)
             model2 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=False)
+            model3 = self.model(s=s, pk_model_params=self.default_params_dict, bao_peak=bao_peak, negative=False)
 
             bbd1 = 0
             bbd2 = 0
+            bbd3 = 0
             fixed_params = self.default_params_dict.keys()
             
-        models = [model1, model2]
-        bbds = [bbd1, bbd2]
+        models = [model1, model2, model3]
+        bbds = [bbd1, bbd2, bbd3]
             
         for split in range(self.nsplits):
             ax = axes[split]
@@ -593,7 +609,7 @@ class PkModel:
                     ax.plot([], [], linestyle='--', color='C0', label='Model')
 
                 ax.set_ylabel(r'$s^2\xi_{}(s)$'.format(self.ells[0])+r'[$(\mathrm{Mpc}/h)^{2}$]')
-                if show_broadband and 'broadband_coeffs1' in self.popt_dict.keys() and 'broadband_coeffs2' in self.popt_dict.keys():
+                if show_broadband and 'broadband_coeffs1' in self.popt_dict.keys() and 'broadband_coeffs2' in self.popt_dict.keys() and 'broadband_coeffs3' in self.popt_dict.keys():
                     ax.plot(s, s**2 * bbds[split][0], ls='dotted', color='C0', label='Broadband')
 
             else:
@@ -603,12 +619,12 @@ class PkModel:
                         ax.errorbar(s, s**2 * self.xiell[split][ill], s**2 * self.std[split][ill], fmt='-', color='C'+str(ill))
                     if show_broadband:
                         ax.plot(s, s**2 * bbds[split][ill], ls='dotted', color='C'+str(ill))
-                    ax.set_ylabel(r'$s^{2}\xi(s)$ [$(\mathrm{Mpc}/h)^{2}$]')
+                    ax.set_ylabel(r'$s^{2}\xi_{\ell}(s)$ [$(\mathrm{Mpc}/h)^{2}$]')
                 if plot_data:
                     # For legend
                     ax.errorbar([], [], [], linestyle='-', color='black', label='Data')
                     ax.plot([],[], linestyle='--', color='black', label='Model')
-                if show_broadband and 'broadband_coeffs1' in self.popt_dict.keys() and 'broadband_coeffs2' in self.popt_dict.keys():
+                if show_broadband and 'broadband_coeffs1' in self.popt_dict.keys() and 'broadband_coeffs2' in self.popt_dict.keys() and 'broadband_coeffs3' in self.popt_dict.keys():
                     ax.plot([], [], linestyle='dotted', color='black', label='Broadband')
 
             ax.set_xlabel('$s$ [$\mathrm{Mpc}/h$]')
@@ -619,7 +635,7 @@ class PkModel:
                 
             ax.set_title('DS{}'.format(split+1))
             
-        axes[1].legend()
+        axes[self.nsplits-1].legend()
         if show_info:
             if self.fitted:
                 if hasattr(self, 'minos') and self.minos:
@@ -670,7 +686,7 @@ def plot_likelihood(pk_model, param_name, param_values, free_params_init, s_lowe
     nparams = len(pk_model.popt)
     conf_int = [scipy.stats.chi2.cdf(s**2, 1) for s in [1, 2, 3]]
     chi2_sigmas = [scipy.stats.chi2.ppf(ci, nparams) for ci in conf_int]
-    print(chi2_sigmas)
+#    print(chi2_sigmas)
 
     param_limits_idx = np.argwhere(np.diff(np.sign(chi2_bao_peak - (min_chi2+chi2_sigmas[0])))).flatten()
 

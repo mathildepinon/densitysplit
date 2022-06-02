@@ -128,6 +128,7 @@ class DensitySplit:
         split_indices = list()
         split_densities = list()
         split_positions = list()
+        split_positions_rsd = list()
 
         for i in range(nsplits):
             split_min = bins[i]
@@ -144,6 +145,10 @@ class DensitySplit:
             split_indices.append(indices)
             split_densities.append(self.data_densities.T[indices].T)
             split_positions.append(self.data.positions.T[indices].T)
+            
+            if self.data.positions_rsd is not None:
+                split_positions_rsd.append(self.data.positions_rsd.T[indices].T)
+                self.split_positions_rsd = split_positions_rsd
 
         self.nsplits = nsplits
         self.split_bins = bins
@@ -272,16 +277,26 @@ class DensitySplit:
 
     def __getstate__(self):
         state = {}
-        for name in ['data', 'boxsize', 'boxcenter', 'offset',
+        for name in ['boxsize', 'boxcenter', 'offset',
                      'use_rsd', 'use_weights', 'cellsize', 'resampler', 'density_mesh', 'data_densities',
-                     'nsplits', 'split_bins', 'split_labels', 'split_mesh', 'split_indices', 'split_densities', 'split_positions', 'split_samples']:
+                     'nsplits', 'split_bins', 'split_labels', 'split_mesh', 'split_indices', 'split_densities', 'split_positions', 'split_positions_rsd',
+                     'split_samples']:
             if hasattr(self, name):
                 state[name] = getattr(self, name)
+        if hasattr(self, 'data'):
+            state['data'] = self.data.__getstate__()
+        state['density_mesh'] = {'array': self.density_mesh.value, 'boxsize': self.density_mesh.pm.BoxSize}
         return state
 
 
     def __setstate__(self, state):
         self.__dict__.update(state)
+        self.data = catalog_data.Data.from_state(self.data)
+        from pmesh.pm import ParticleMesh
+        pm = ParticleMesh(BoxSize=self.density_mesh['boxsize'], Nmesh=self.density_mesh['array'].shape, dtype=self.density_mesh['array'].dtype)
+        mesh = pm.create(type='real')
+        mesh.unravel(self.density_mesh['array'].ravel())
+        self.density_mesh = mesh
 
 
     def save(self, filename):

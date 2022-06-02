@@ -92,7 +92,7 @@ class Data:
         ax.set_ylabel(plot_directions[1]+' [Mpc/h]')
         ax.set_aspect('equal', adjustable='box')
 
-
+        
     def __getstate__(self):
         state = {}
         for name in ['name', 'positions', 'size', 'redshift',
@@ -102,9 +102,16 @@ class Data:
                 state[name] = getattr(self, name)
         return state
 
-
+    
     def __setstate__(self, state):
         self.__dict__.update(state)
+
+        
+    @classmethod
+    def from_state(cls, state):
+        new = cls.__new__(cls)
+        new.__setstate__(state)
+        return new       
 
 
     def save(self, filename):
