@@ -13,7 +13,8 @@ from bin.density_split_mocks_functions import generate_N_mocks, generate_batch_2
 setup_logging()
 
 # Mock batch
-batch_index = int(sys.argv[1])
+#batch_index = int(sys.argv[1])
+batch_index = 0
 
 # Data and output directories
 data_dir = '/feynman/work/dphp/mp270220/data/'
@@ -48,40 +49,45 @@ los = 'x'
 # Mocks
 nmocks = 1000
 nmesh = 512
+nbar = 5*catalog.size/catalog.boxsize**3
 
 # For RSD
 cosmology=fiducial.AbacusSummitBase()
 bg = cosmology.get_background()
-f = bg.Omega_m(catalog.redshift)**0.55
+f = bg.growth_rate(catalog.redshift)
 
 # Set RSD
-#hz = bg.hubble_function(catalog.redshift)
 hz = 100*bg.efunc(catalog.redshift)
 catalog.set_rsd(hz=hz)
 
 # Generate mocks and save them
-#generate_N_mocks(catalog, nmocks=nmocks, nmesh=nmesh, 
-#                 bias=bias, 
-#                 rsd=True, los=los, f=f,
-#                 output_dir=output_dir+'mocks_rsd/', mpi=True, overwrite=False)
+# generate_N_mocks(catalog, nmocks=10, nmesh=nmesh,
+#                  bias=bias,
+#                  rsd=True, los=los, f=f, nbar=nbar,
+#                  output_dir=output_dir+'mocks_rsd/', mpi=True, overwrite=False,
+#                  type = 'gaussian')
 
-#results = generate_batch_2PCF(catalog, nmocks=nmocks, nmesh=nmesh,
-#                          bias=bias,
-#                          edges=edges, los=los,
-#                          rsd=True,
-#                          nthreads=10, batch_size=10, batch_index=batch_index,
-#                          save_each=True, output_dir=output_dir+'mocks_rsd/', mpi=False, overwrite=False)
+# results = generate_batch_2PCF(catalog, nmocks=nmocks, nmesh=nmesh,
+#                              bias=bias,
+#                              edges=edges, los=los,
+#                              rsd=False,
+#                              nthreads=128, batch_size=10, batch_index=batch_index,
+#                              save_each=True, output_dir=output_dir+'mocks_rsd/', mpi=False, overwrite=False)
 
 results_hh_auto, results_hh_cross, results_rh = generate_batch_densitySplit_CCF(catalog, nmocks=nmocks,
                                                                                  nmesh=nmesh,
                                                                                  bias=bias,
                                                                                  cellsize=cellsize, resampler=resampler, nsplits=nsplits, use_rsd=False,
                                                                                  randoms_size=randoms_size,
-                                                                                 edges=edges, los=los, f=f, rsd=True,
-                                                                                 nthreads=10, batch_size=10, batch_index=batch_index,
+                                                                                 edges=edges, los=los, f=f, rsd=True, use_weights=True, nbar=nbar,
+                                                                                 nthreads=128, batch_size=10, batch_index=batch_index,
                                                                                  save_each=True, output_dir=output_dir+'mocks_rsd/', mpi=False, overwrite=False)
 
-#np.save(output_dir+catalog.name+'_1000_mocks_2PCF_RSD_batch'+str(batch_index), results)
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_hh_autoCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index), results_hh_auto)
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_hh_crossCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index), results_hh_cross)
-np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_rh_CCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index), results_rh)
+# np.save(output_dir+catalog.name+'_10_gaussianMocks_2PCF', results)
+# np.save(output_dir+catalog.name+'_1000_mocks_2PCF_RSD_batch'+str(batch_index), results)
+# np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_hh_autoCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index), results_hh_auto)
+# np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_hh_crossCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index), results_hh_cross)
+# np.save(output_dir+catalog.name+'_1000_mocks_densitySplit_rh_CCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_realDensity_RSD_batch'+str(batch_index), results_rh)
+np.save(output_dir+catalog.name+'_10_gaussianMocks_nbarx5_densitySplit_hh_autoCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size), results_hh_auto)
+np.save(output_dir+catalog.name+'_10_gaussianMocks_nbarx5_densitySplit_hh_crossCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size), results_hh_cross)
+np.save(output_dir+catalog.name+'_10_gaussianMocks_nbarx5_densitySplit_rh_CCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size), results_rh)
