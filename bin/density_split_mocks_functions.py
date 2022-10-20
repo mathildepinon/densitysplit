@@ -112,7 +112,7 @@ def generate_gaussian_mock(nmesh, boxsize, boxcenter, seed, cosmology, nbar, z, 
                 ## to complete (weights_rsd in catalog_data.Data ?)
             if save:
                 mock_catalog.save(output_dir+name)
-                #np.save(output_dir+name+'_xi_from_delta_r', xi)
+                np.save(output_dir+name+'_xi_from_delta_r', xi)
 
     else:
         mock_catalog = catalog_data.Data(positions.T, z, boxsize, boxcenter, name=name, weights=weights)
@@ -128,7 +128,7 @@ def generate_N_mocks(catalog, nmocks, nmesh, bias, rsd=False, los=None, f=None, 
     if nbar is None:
         nbar=catalog.size/catalog.boxsize**3
 
-    for i in range(nmocks):
+    for i in range(60, nmocks+60):
         filename = catalog.name+'_gaussianMock{}_truncatedPk_nbarx5'.format(i)
         if not exists(output_dir+filename+'.npy') or overwrite:
             if type == 'lagrangian':
@@ -145,10 +145,10 @@ def generate_N_mocks(catalog, nmocks, nmesh, bias, rsd=False, los=None, f=None, 
                                      mpi=mpi)
 
 
-def split_density(catalog, cellsize, resampler, nsplits, use_rsd=False, use_weights=False, save=False, output_dir=''):
+def split_density(catalog, cellsize, resampler, nsplits, bins=None, use_rsd=False, use_weights=False, save=False, output_dir=''):
     catalog_density = density_split.DensitySplit(catalog)
     catalog_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=use_rsd, use_weights=use_weights)
-    catalog_density.split_density(nsplits)
+    catalog_density.split_density(nsplits, bins=bins)
 
     if save:
         catalog_density.save(output_dir+catalog.name+'_density')
@@ -299,7 +299,8 @@ def generate_batch_2PCF(catalog, nmocks, nmesh, bias, edges,
 
 def generate_batch_densitySplit_CCF(catalog, nmocks, nmesh, bias,
                                     cellsize, resampler, nsplits, use_rsd,
-                                    randoms_size, edges, los, f=None, rsd=False, use_weights=False, nbar=None,
+                                    randoms_size, edges, los, f=None, rsd=False, use_weights=False, 
+                                    nbar=None, bins=None,
                                     nthreads=128,
                                     batch_size=None, batch_index=0,
                                     save_each=False, output_dir='', mpi=False, overwrite=True):
@@ -318,7 +319,7 @@ def generate_batch_densitySplit_CCF(catalog, nmocks, nmesh, bias,
 
     for i in mocks_indices:
         print('Mock '+str(i))
-        filename = catalog.name+'_mock{}'.format(i)
+        filename = catalog.name+'_gaussianMock{}_truncatedPk_nbarx5'.format(i)
         if exists(output_dir+filename+'.npy') and not overwrite:
             print('Mock already exists. Loading mock...')
             mock_catalog = catalog_data.Data.load(output_dir+filename+'.npy')
@@ -333,7 +334,7 @@ def generate_batch_densitySplit_CCF(catalog, nmocks, nmesh, bias,
 
         if mock_catalog is not None:
             print('Computing density splits...')
-            mock_density = split_density(mock_catalog, cellsize, resampler, nsplits, use_rsd=use_rsd, use_weights=use_weights, save=False)
+            mock_density = split_density(mock_catalog, cellsize, resampler, nsplits, bins=bins, use_rsd=use_rsd, use_weights=use_weights, save=False)
             print('Computing correlation function...')
             mock_CCFs = compute_densitySplit_CCF(mock_density, edges, los, use_rsd=rsd, use_weights=use_weights, randoms_size=randoms_size, nthreads=nthreads)
             result_hh_auto = mock_CCFs['hh_auto']

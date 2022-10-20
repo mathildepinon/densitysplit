@@ -25,7 +25,7 @@ output_dir = '/feynman/work/dphp/mp270220/outputs/'
 #catalog_name = 'AbacusSummit_1Gpc_z1.175'
 bias = 1.8
 
-catalog_name = 'AbacusSummit_2Gpc_z1.175'
+catalog_name = 'AbacusSummit_1Gpc_z1.175'
 #bias = 3.
 
 #catalog_name = 'AbacusSummit_2Gpc_z0.800'
@@ -48,7 +48,7 @@ los = 'x'
 
 # Mocks
 nmocks = 5000
-nmesh = 1024
+nmesh = 512
 nbar = catalog.size/catalog.boxsize**3
 
 # For RSD
@@ -61,18 +61,18 @@ hz = 100*bg.efunc(catalog.redshift)
 catalog.set_rsd(hz=hz)
 
 # Generate mocks and save them
-# generate_N_mocks(catalog, nmocks=10, nmesh=nmesh,
-#                  bias=bias,
-#                  rsd=False, los=los, f=f, nbar=5*nbar,
-#                  output_dir=output_dir+'mocks/gaussian/', mpi=True, overwrite=True,
-#                  type = 'gaussian')
+generate_N_mocks(catalog, nmocks=40, nmesh=nmesh,
+                 bias=bias,
+                 rsd=False, los=los, f=f, nbar=5*nbar,
+                 output_dir=output_dir+'mocks/gaussian/', mpi=True, overwrite=True,
+                 type = 'gaussian')
 
-results = generate_batch_2PCF(catalog, nmocks=10, nmesh=nmesh,
-                             bias=bias,
-                             edges=edges, los=los,
-                             rsd=False, use_weights=True,
-                             nthreads=128, batch_size=10, batch_index=batch_index,
-                             save_each=False, output_dir=output_dir+'mocks/gaussian/', mpi=False, overwrite=False)
+# results = generate_batch_2PCF(catalog, nmocks=50, nmesh=nmesh,
+#                              bias=bias,
+#                              edges=edges, los=los,
+#                              rsd=False, use_weights=True,
+#                              nthreads=128, batch_size=50, batch_index=batch_index,
+#                              save_each=False, output_dir=output_dir+'mocks/gaussian/', mpi=False, overwrite=False)
 
 # results_hh_auto, results_hh_cross, results_rh = generate_batch_densitySplit_CCF(catalog, nmocks=10,
 #                                                                                  nmesh=nmesh,
@@ -81,7 +81,7 @@ results = generate_batch_2PCF(catalog, nmocks=10, nmesh=nmesh,
 #                                                                                  randoms_size=randoms_size,
 #                                                                                  edges=edges, los=los, f=f, rsd=False, use_weights=True, nbar=nbar,
 #                                                                                  nthreads=128, batch_size=10, batch_index=batch_index,
-#                                                                                  save_each=True, output_dir=output_dir+'mocks_rsd/', mpi=False, overwrite=False)
+#                                                                                  save_each=True, output_dir=output_dir+'mocks/gaussian/', mpi=False, overwrite=False)
 
 # results = generate_batch_xi_R(catalog, nmocks=10,
 #                              nmesh=nmesh,
@@ -92,7 +92,7 @@ results = generate_batch_2PCF(catalog, nmocks=10, nmesh=nmesh,
 #                              save_each=True, output_dir=output_dir+'mocks_rsd/', mpi=False, overwrite=False)
 
 # np.save(output_dir+catalog.name+'_10_gaussianMocks_truncatedPk_nbarx5_cellsize'+str(cellsize)+'_xi_R', results)
-np.save(output_dir+catalog.name+'_10_gaussianMocks_truncatedPk_nbarx5_cellsize'+str(cellsize)+'_2PCF', results)
+# np.save(output_dir+catalog.name+'_10_gaussianMocks_truncatedPk_nbarx5_cellsize'+str(cellsize)+'_2PCF', results)
 # np.save(output_dir+catalog.name+'_4000_mocks_2PCF_batch'+str(batch_index), results)
 # np.save(output_dir+catalog.name+'_4000_mocks_densitySplit_hh_autoCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_batch'+str(batch_index), results_hh_auto)
 # np.save(output_dir+catalog.name+'_4000_mocks_densitySplit_hh_crossCF_cellsize'+str(cellsize)+'_randomsize'+str(randoms_size)+'_batch'+str(batch_index), results_hh_cross)
