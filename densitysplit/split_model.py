@@ -99,7 +99,7 @@ class SplitCCFModel:
 
     def smoothed_density_moment(self, p):
         fourier_kernel = self.smoothing_kernel_3D()
-        norm_fourier_kernel = fourier_kernel / fourier_kernel.BoxSize.prod()
+        norm_fourier_kernel = fourier_kernel / self.boxsize**3
         real_space_kernel = norm_fourier_kernel.c2r()
         real_space_kernel.value = np.real(real_space_kernel.value)
         xi_R_field = self.smoothed_pk_3D.c2r()
@@ -108,7 +108,7 @@ class SplitCCFModel:
             res = 0
         if p==2:
             first_term = integrate_pmesh_field(real_space_kernel**2)
-            second_term = integrate_pmesh_field(real_space_kernel * xi_R_field) # NB: actually equal to self.simga_RR
+            second_term = integrate_pmesh_field(real_space_kernel * xi_R_field)  # NB: actually equal to self.simga_RR**2
             res = self.sigma**2 * self.nbar * first_term + self.nbar**2 * second_term
         if p==4:
             term1 = integrate_pmesh_field(real_space_kernel**4)
@@ -120,16 +120,16 @@ class SplitCCFModel:
             term4 = integrate_pmesh_field(squared_real_kernel * fourier_squared_xi_R.c2r())
             term5 = integrate_pmesh_field(real_space_kernel) * integrate_pmesh_field(real_space_kernel**2 * xi_R_field)
             term6 = integrate_pmesh_field(real_space_kernel**2 * xi_R_field**2)
-            term7 = integrate_pmesh_field(xi_R_field)**2
-            res = 3 * self.sigma**4 * self.nbar * term1.real \
-                + 12 * self.sigma**2 * self.nbar**2 * term2.real \
-                + 6 * self.sigma**4 * self.nbar**2 * term3.real \
-                + 12 * self.nbar**2 * term4.real \
+            term7 = integrate_pmesh_field(real_space_kernel * xi_R_field)**2 # NB: actually equal to self.simga_RR**4
+            res = 3 * self.sigma**4 * self.nbar * term1.real / self.nmesh**3 \
+                + 12 * self.sigma**2 * self.nbar**2 * term2.real / self.nmesh**3 \
+                + 3 * self.sigma**4 * self.nbar**2 * term3.real \
+                + 6 * self.nbar**2 * term4.real \
                 + 6 * self.sigma**2 * self.nbar**3 * term5.real \
                 + 12 * self.nbar**3 * term6.real \
                 + 3 * self.nbar**4 * term7.real
-        print(p, res/self.nbar**p)
-        return res/self.nbar**p
+        print(p, res / self.nbar**p)
+        return res / self.nbar**p
 
     def smoothed_density_cumulant(self, p):
         moments = [self.smoothed_density_moment(i+1) for i in range(p)]
