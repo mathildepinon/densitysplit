@@ -117,12 +117,12 @@ class SplitCCFModel:
             squared_real_kernel = real_space_kernel**2
             squared_real_xi_R = self.pk_3D.c2r()**2
             fourier_squared_xi_R = squared_real_kernel.r2c() * squared_real_xi_R.r2c()
-            term4 = integrate_pmesh_field(squared_real_kernel * fourier_squared_xi_R.c2r())
-            term5 = integrate_pmesh_field(real_space_kernel) * integrate_pmesh_field(real_space_kernel**2 * xi_R_field)
+            term4 = integrate_pmesh_field(squared_real_kernel * fourier_squared_xi_R.c2r()) * self.boxsize**3
+            term5 = integrate_pmesh_field(real_space_kernel**2) * integrate_pmesh_field(real_space_kernel * xi_R_field)
             term6 = integrate_pmesh_field(real_space_kernel**2 * xi_R_field**2)
             term7 = integrate_pmesh_field(real_space_kernel * xi_R_field)**2 # NB: actually equal to self.simga_RR**4
-            res = 3 * self.sigma**4 * self.nbar * term1.real / self.nmesh**3 \
-                + 12 * self.sigma**2 * self.nbar**2 * term2.real / self.nmesh**3 \
+            res = 3 * self.sigma**4 * self.nbar * term1.real \
+                + 12 * self.sigma**2 * self.nbar**2 * term2.real \
                 + 3 * self.sigma**4 * self.nbar**2 * term3.real \
                 + 6 * self.nbar**2 * term4.real \
                 + 6 * self.sigma**2 * self.nbar**3 * term5.real \
