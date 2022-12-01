@@ -97,43 +97,79 @@ class SplitCCFModel:
         intg = integrate_pmesh_field((real_space_kernel)**p)
         return self.nbar * intg
 
-    def smoothed_density_moment(self, p):
+    def smoothed_density_moments(self):
         fourier_kernel = self.smoothing_kernel_3D()
         norm_fourier_kernel = fourier_kernel / self.boxsize**3
         real_space_kernel = norm_fourier_kernel.c2r()
         real_space_kernel.value = np.real(real_space_kernel.value)
         xi_R_field = self.smoothed_pk_3D.c2r()
         xi_R_field.value = np.real(xi_R_field.value)
-        if p % 2 != 0:
-            res = 0
-        if p==2:
-            first_term = integrate_pmesh_field(real_space_kernel**2)
-            second_term = integrate_pmesh_field(real_space_kernel * xi_R_field)  # NB: actually equal to self.simga_RR**2
-            res = self.sigma**2 * self.nbar * first_term + self.nbar**2 * second_term
-        if p==4:
-            term1 = integrate_pmesh_field(real_space_kernel**4)
-            term2 = integrate_pmesh_field(real_space_kernel**3 * xi_R_field)
-            term3 = integrate_pmesh_field(real_space_kernel**2)**2
-            squared_real_kernel = real_space_kernel**2
-            squared_real_xi_R = self.pk_3D.c2r()**2
-            fourier_squared_xi_R = squared_real_kernel.r2c() * squared_real_xi_R.r2c()
-            term4 = integrate_pmesh_field(squared_real_kernel * fourier_squared_xi_R.c2r()) * self.boxsize**3
-            term5 = integrate_pmesh_field(real_space_kernel**2) * integrate_pmesh_field(real_space_kernel * xi_R_field)
-            term6 = integrate_pmesh_field(real_space_kernel**2 * xi_R_field**2)
-            term7 = integrate_pmesh_field(real_space_kernel * xi_R_field)**2 # NB: actually equal to self.simga_RR**4
-            res = 3 * self.sigma**4 * self.nbar * term1.real \
-                + 12 * self.sigma**2 * self.nbar**2 * term2.real \
-                + 3 * self.sigma**4 * self.nbar**2 * term3.real \
-                + 6 * self.nbar**2 * term4.real \
-                + 6 * self.sigma**2 * self.nbar**3 * term5.real \
-                + 12 * self.nbar**3 * term6.real \
-                + 3 * self.nbar**4 * term7.real
-        print(p, res / self.nbar**p)
-        return res / self.nbar**p
+
+        ## p=1
+        ## this is the moment of the variable (1 + delta)*p/nbar
+        ## where delta is Gaussian and p follows a Poisson distribution of parameter nbar
+        w1 = integrate_pmesh_field(real_space_kernel)
+        res1 = w1
+        print(res1)
+
+        ## p=2
+        w2 = integrate_pmesh_field(real_space_kernel**2)
+        ## second order moment of delta*p/nbar
+        m2 = self.sigma**2 / self.nbar * w2 + self.sigma_RR**2
+        ## second order moment of (1 + delta)*p/nbar
+        res2 = m2 + w1**2 + w2 / self.nbar
+        print(res2)
+
+        ## p=3
+        w3 = integrate_pmesh_field(real_space_kernel**3)
+        w2_xiR = integrate_pmesh_field(real_space_kernel**2 * xi_R_field)
+        ## third order moment of (1 + delta)*p/nbar
+        res3 = (1 + 3 * self.sigma**2) * w3 / self.nbar**2 \
+            + (1 + self.sigma**2) * w2 * w1 / self.nbar \
+            + w2_xiR / self.nbar \
+            + w1**3 \
+            + w1 * self.sigma_RR**2
+        print(res3)
+
+        ## p=4
+        w4 = integrate_pmesh_field(real_space_kernel**4)
+        w3_xiR = integrate_pmesh_field(real_space_kernel**3 * xi_R_field)
+        squared_real_kernel = real_space_kernel**2
+        squared_real_xi_R = self.pk_3D.c2r()**2
+        fourier_squared_kernel = squared_real_kernel.r2c()
+        fourier_squared_xi_R = fourier_squared_kernel * squared_real_xi_R.r2c()
+        term4 = integrate_pmesh_field(squared_real_kernel * fourier_squared_xi_R.c2r()) * self.boxsize**3
+        #term5 = integrate_pmesh_field(real_space_kernel**2) * integrate_pmesh_field(real_space_kernel * xi_R_field)
+        w2_xiR2 = integrate_pmesh_field(real_space_kernel**2 * xi_R_field**2)
+        ## fourth order moment of delta*p/nbar
+        m4 = 3 * self.sigma**4 * w4 / self.nbar**3 \
+            + 12 * self.sigma**2 * w3_xiR / self.nbar**2 \
+            + 3 * self.sigma**4 * w2**2 / self.nbar**2 \
+            + 6 * term4 / self.nbar**2 \
+            + 6 * self.sigma**2 * w2 * self.sigma_RR**2 / self.nbar \
+            + 12 * w2_xiR2 / self.nbar \
+            + 3 * self.sigma_RR**4
+
+        ## fourth order moment of (1 + delta)*p/nbar
+        fourier_aux = fourier_squared_kernel**2 * self.pk_3D
+        aux = integrate_pmesh_field(squared_real_kernel * fourier_aux.c2r()) * self.boxsize**3
+        term4_bis = 4 * aux + 2 * term4
+        res4 = 3 * (1 + 2*self.sigma**2 + self.sigma**4) * w4 / self.nbar**3 \
+            + 12 * (1 + self.sigma**2) * (w3 * w1 + w3_xiR) / self.nbar**2 \
+            + 3 * ((3 + 2 * self.sigma**2 + self.sigma**4) * w2**2 + term4_bis) / self.nbar**2 \
+            + 6 * ((3 + self.sigma**2) * w2 * w1**2 + (1 + self.sigma**2) * w2 * self.sigma_RR**2 + 4 * w1 * w2_xiR \
+            + 2 * w2_xiR2) / self.nbar \
+            + 3 * (w1**4 + 2 * w1**2 * self.sigma_RR*2 + self.sigma_RR**4)
+        print(res4)
+
+        res = [res1.real, res2.real, res3.real, res4.real]
+        self.density_moments = res
+
+        return res
 
     def smoothed_density_cumulant(self, p):
-        moments = [self.smoothed_density_moment(i+1) for i in range(p)]
-        return float(cumulant_from_moments(moments, p))
+        moments = self.smoothed_density_moments()
+        return float(cumulant_from_moments(moments[0:p], p))
 
     def set_xi_model(self):
         # powerToCorrelation = PowerToCorrelation(self.k)
