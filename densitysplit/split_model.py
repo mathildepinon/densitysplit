@@ -108,7 +108,7 @@ class SplitCCFModel:
         ## p=1
         ## this is the moment of the variable (1 + delta)*p/nbar
         ## where delta is Gaussian and p follows a Poisson distribution of parameter nbar
-        w1 = integrate_pmesh_field(real_space_kernel)
+        w1 = integrate_pmesh_field(real_space_kernel) ## should be 1
         res1 = w1
         print(res1)
 
@@ -125,19 +125,19 @@ class SplitCCFModel:
         w2_xiR = integrate_pmesh_field(real_space_kernel**2 * xi_R_field)
         ## third order moment of (1 + delta)*p/nbar
         res3 = (1 + 3 * self.sigma**2) * w3 / self.nbar**2 \
-            + (1 + self.sigma**2) * w2 * w1 / self.nbar \
-            + w2_xiR / self.nbar \
+            + 3 * (1 + self.sigma**2) * w2 * w1 / self.nbar \
+            + 3 * w2_xiR / self.nbar \
             + w1**3 \
-            + w1 * self.sigma_RR**2
+            + 3 * w1 * self.sigma_RR**2
         print(res3)
 
         ## p=4
         w4 = integrate_pmesh_field(real_space_kernel**4)
         w3_xiR = integrate_pmesh_field(real_space_kernel**3 * xi_R_field)
         squared_real_kernel = real_space_kernel**2
-        squared_real_xi_R = self.pk_3D.c2r()**2
+        squared_real_xi = self.pk_3D.c2r()**2
         fourier_squared_kernel = squared_real_kernel.r2c()
-        fourier_squared_xi_R = fourier_squared_kernel * squared_real_xi_R.r2c()
+        fourier_squared_xi_R = fourier_squared_kernel * squared_real_xi.r2c()
         term4 = integrate_pmesh_field(squared_real_kernel * fourier_squared_xi_R.c2r()) * self.boxsize**3
         #term5 = integrate_pmesh_field(real_space_kernel**2) * integrate_pmesh_field(real_space_kernel * xi_R_field)
         w2_xiR2 = integrate_pmesh_field(real_space_kernel**2 * xi_R_field**2)
@@ -151,7 +151,7 @@ class SplitCCFModel:
             + 3 * self.sigma_RR**4
 
         ## fourth order moment of (1 + delta)*p/nbar
-        fourier_aux = fourier_squared_kernel**2 * self.pk_3D
+        fourier_aux = fourier_squared_kernel * self.pk_3D
         aux = integrate_pmesh_field(squared_real_kernel * fourier_aux.c2r()) * self.boxsize**3
         term4_bis = 4 * aux + 2 * term4
         res4 = 3 * (1 + 2*self.sigma**2 + self.sigma**4) * w4 / self.nbar**3 \
@@ -159,7 +159,7 @@ class SplitCCFModel:
             + 3 * ((3 + 2 * self.sigma**2 + self.sigma**4) * w2**2 + term4_bis) / self.nbar**2 \
             + 6 * ((3 + self.sigma**2) * w2 * w1**2 + (1 + self.sigma**2) * w2 * self.sigma_RR**2 + 4 * w1 * w2_xiR \
             + 2 * w2_xiR2) / self.nbar \
-            + 3 * (w1**4 + 2 * w1**2 * self.sigma_RR*2 + self.sigma_RR**4)
+            + 3 * (w1**4 + 2 * w1**2 * self.sigma_RR**2 + self.sigma_RR**4)
         print(res4)
 
         res = [res1.real, res2.real, res3.real, res4.real]
