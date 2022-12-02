@@ -126,7 +126,7 @@ class SplitCCFModel:
         ## third order moment of (1 + delta)*p/nbar
         res3 = (1 + 3 * self.sigma**2) * w3 / self.nbar**2 \
             + 3 * (1 + self.sigma**2) * w2 * w1 / self.nbar \
-            + 3 * w2_xiR / self.nbar \
+            + 6 * w2_xiR / self.nbar \
             + w1**3 \
             + 3 * w1 * self.sigma_RR**2
         print(res3)
@@ -162,7 +162,7 @@ class SplitCCFModel:
             + 3 * (w1**4 + 2 * w1**2 * self.sigma_RR**2 + self.sigma_RR**4)
         print(res4)
 
-        res = [res1.real, res2.real, res3.real, res4.real]
+        res = [res1, res2, res3, res4]
         self.density_moments = res
 
         return res
