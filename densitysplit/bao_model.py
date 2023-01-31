@@ -72,21 +72,25 @@ class BAOModel:
         else:
             model_params = {'sigma_s': 4.}
             model_params_labels = {'sigma_s': r'$\Sigma_{s}$'}
+            model_params = {'f': 0., 'b':2., 'sigma_s': 4.}
+            model_params_labels = {'f': r'$f$', 'b': r'$b$', 'sigma_s': r'$\Sigma_{s}$'}
 
             if self.iso:
                 model_params.update({'alpha_iso': 1., 'sigma_iso': 5})
                 model_params_labels.update({'alpha_iso': r'$\alpha_{iso}$', 'sigma_iso': r'$\Sigma_{iso}$'})
 
             else:
-                model_params.update({'alpha_par': 1., 'alpha_perp': 1., 'sigma_par': 8., 'sigma_perp': 3.})
-                model_params_labels.update({'alpha_par': r'$\alpha_{\parallel}$', 'alpha_perp': r'$\alpha_{\perp}$', 'sigma_par': r'$\Sigma_{\parallel}$', 'sigma_perp': r'$\Sigma_{\perp}$'})
+                # model_params.update({'alpha_par': 1., 'alpha_perp': 1., 'sigma_par': 8., 'sigma_perp': 3.})
+                # model_params_labels.update({'alpha_par': r'$\alpha_{\parallel}$', 'alpha_perp': r'$\alpha_{\perp}$', 'sigma_par': r'$\Sigma_{\parallel}$', 'sigma_perp': r'$\Sigma_{\perp}$'})
+                model_params.update({'alpha_iso': 1., 'F': 1., 'sigma_par': 8., 'sigma_perp': 3.})
+                model_params_labels.update({'alpha_iso': r'$\alpha_{iso}$', 'F': r'$F$', 'sigma_par': r'$\Sigma_{\parallel}$', 'sigma_perp': r'$\Sigma_{\perp}$'})
 
             # Bias parameters
-            for i in range(self.nsplits):
-                model_params.update({'f_DS'+str(i+1): 0.})
-                model_params.update({'b_DS'+str(i+1): 2.})
-                model_params_labels.update({'f_DS'+str(i+1): r'$f\,(DS{split})$'.format(split=i+1)})
-                model_params_labels.update({'b_DS'+str(i+1): r'$b\,(DS{split})$'.format(split=i+1)})
+            # for i in range(self.nsplits):
+            #     model_params.update({'f_DS'+str(i+1): 0.})
+            #     model_params_labels.update({'f_DS'+str(i+1): r'$f\,(DS{split})$'.format(split=i+1)})
+            #     model_params.update({'b_DS'+str(i+1): 2.})
+            #     model_params_labels.update({'b_DS'+str(i+1): r'$b\,(DS{split})$'.format(split=i+1)})
 
             # Broadband coefficients
             for i in range(self.nsplits):
@@ -149,12 +153,23 @@ class BAOModel:
             model_params['sigma_perp'] = model_params['sigma_iso']
 
         mu_AP, k_AP = AP_dilation(mu, self.k, model_params['alpha_par'], model_params['alpha_perp'])
+        # print(mu_AP)
+        # print(np.shape(mu_AP))
+        # print(k_AP)
+        # print(np.shape(k_AP))
+        #
+        # print(np.tile(mu, (len(self.k), 1)))
+        # print(np.shape(np.tile(mu, (len(self.k), 1))))
+        # print(self.k)
+        # print(np.shape(self.k))
+        mu_fid = np.tile(mu, (len(self.k), 1))
+        k_fid = self.k[np.newaxis].T
 
         if self.bao_peak:
             pk_peak = self.pk(k=k_AP) - self.pk_smooth(k=k_AP)
         else:
             pk_peak = 0
-        pk_model = bias_damping_func(mu_AP, k_AP, model_params['f'], model_params['b'], model_params['sigma_s']) * (self.pk_smooth(k=k_AP) + BAO_damping_func(mu_AP, k_AP, model_params['sigma_par'], model_params['sigma_perp']) * pk_peak)
+        pk_model = bias_damping_func(mu_fid, k_fid, model_params['f'], model_params['b'], model_params['sigma_s']) * (self.pk_smooth(k=k_fid) + BAO_damping_func(mu_AP, k_AP, model_params['sigma_par'], model_params['sigma_perp']) * pk_peak)
 
         return pk_model/(model_params['alpha_par']*model_params['alpha_perp']**2)
 
@@ -200,10 +215,22 @@ class BAOModel:
 
         common_params = {key: val for (key, val) in params.items() if not 'DS' in key}
 
+        common_params =  copy.deepcopy(params)
+        f = common_params.pop('f')
+        b = common_params.pop('b')
+        f_ratios = [0.8350931568006449, 1.1365422256346123, 1.6905165785769065]
+        b_ratios = [0.9195969838919377, 1.257762672850454, 1.8495686604094723]
+
+        alpha_iso = common_params.pop('alpha_iso')
+        F = common_params.pop('F')
+        common_params.update({'alpha_par': alpha_iso*F**(2/3)})
+        common_params.update({'alpha_perp': alpha_iso/(F**(1/3))})
+
         for split in range(self.nsplits):
             split_specific_params = {re.sub('_DS{}'.format(split+1), '', key): val for (key, val) in params.items() if '_DS{}'.format(split+1) in key}
-
             split_params = copy.deepcopy(common_params)
+            split_params.update({'f': f_ratios[split]*f})
+            split_params.update({'b': b_ratios[split]*b})
             split_params.update(split_specific_params)
 
             split_model = self.model(s=s, model_params=split_params, split=split, negative=self.signature[split])

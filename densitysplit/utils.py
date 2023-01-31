@@ -109,7 +109,7 @@ def truncate_xiell(lower_s_limit, s, xiell, ells, cov, split=False, nsplits=1):
     return s_truncated, xiell_toret, cov_truncated_full
 
 
-def compute_chisq(xdata, ydata, sigma, fitted_model):
+def compute_chisq(ydata, sigma, fitted_model):
     r = ydata - fitted_model
 
     chisq = r.T @ np.linalg.inv(sigma) @ r
@@ -154,29 +154,32 @@ def integrate_pmesh_field(field):
     for x in field.slabs.x:
         x_vals.append(x[0][0][0])
 
-    yvals = np.real(x[2][0])
-    zvals = np.real(x[1].transpose()[0])
+    # yvals = np.real(x[2][0])
+    # zvals = np.real(x[1].transpose()[0])
     xvals = np.real(np.array(x_vals))
+    dV = (xvals[1]-xvals[0])**3
     #xvals = np.real(field.slabs.optx[0][0][0])
-    yvals = xvals
-    zvals = xvals
-    x_sorted_indices = xvals.argsort()
-    y_sorted_indices = yvals.argsort()
-    z_sorted_indices = zvals.argsort()
+    # yvals = xvals
+    # zvals = xvals
+    # x_sorted_indices = xvals.argsort()
+    # y_sorted_indices = yvals.argsort()
+    # z_sorted_indices = zvals.argsort()
+    #
+    # x_sorted_field = np.real(field[x_sorted_indices, :, :])
+    # xy_sorted_field = x_sorted_field[:, y_sorted_indices, :]
+    # xyz_sorted_field = xy_sorted_field[:, :, z_sorted_indices]
+    #
+    # sorted_xvals = xvals[x_sorted_indices]
+    # sorted_yvals = yvals[y_sorted_indices]
+    # sorted_zvals = zvals[z_sorted_indices]
+    #
+    # weights_x = weights_trapz(sorted_xvals)
+    # weights_y = weights_trapz(sorted_yvals)
+    # weights_z = weights_trapz(sorted_zvals)
 
-    x_sorted_field = np.real(field[x_sorted_indices, :, :])
-    xy_sorted_field = x_sorted_field[:, y_sorted_indices, :]
-    xyz_sorted_field = xy_sorted_field[:, :, z_sorted_indices]
+    # intz = np.sum(xyz_sorted_field[:, :, :] * weights_z[None, None, :], axis=2)
+    # intyz = np.sum(intz[:, :] * weights_y[None, :], axis=1)
+    # intxyz = np.sum(intyz * weights_x)
+    intxyz = np.sum(np.real(field)) * dV
 
-    sorted_xvals = xvals[x_sorted_indices]
-    sorted_yvals = yvals[y_sorted_indices]
-    sorted_zvals = zvals[z_sorted_indices]
-
-    weights_x = weights_trapz(sorted_xvals)
-    weights_y = weights_trapz(sorted_yvals)
-    weights_z = weights_trapz(sorted_zvals)
-
-    intz = np.sum(xyz_sorted_field[:, :, :] * weights_z[None, None, :], axis=2)
-    intyz = np.sum(intz[:, :] * weights_y[None, :], axis=1)
-    intxyz = np.sum(intyz * weights_x)
     return intxyz

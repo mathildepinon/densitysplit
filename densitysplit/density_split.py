@@ -20,17 +20,17 @@ def sample_splits(density_mesh, resampler, split_bins, size, boxsize, offset, ce
 #    positions_grid_indices = ((np.array(positions) - offset + cellsize/2.) // cellsize).astype(int) % nmesh
     shifted_positions = np.array(positions) - offset
     densities = density_mesh.readout(shifted_positions.T, resampler=resampler)
-    
+
     split_samples = list()
 
 #    for i in np.unique(split_mesh):
 #        split = (split_mesh == i)
 #        sample_in_split = split[tuple(positions_grid_indices.tolist())]
-        
+
 #        split_samples.append(np.array(positions).T[sample_in_split].T)
-        
+
     nsplits = len(split_bins)-1
-    
+
     for i in range(nsplits):
         split_min = split_bins[i]
         split_max = split_bins[i+1]
@@ -40,7 +40,7 @@ def sample_splits(density_mesh, resampler, split_bins, size, boxsize, offset, ce
             split = (densities > split_min)
         else:
             split = np.logical_and((densities > split_min), (densities <= split_max))
-        
+
         split_samples.append(np.array(positions).T[split].T)
 
     return split_samples
@@ -117,12 +117,21 @@ class DensitySplit:
         self.resampler = resampler
 
 
-    def split_density(self, nsplits=2, labels=None):
+    def split_density(self, nsplits=2, bins=None, labels=None):
         if labels is None:
             #labels = ['DS{}'.format(i+1) for i in range(nsplits)]
             labels = [(i+1) for i in range(nsplits)]
 
-        splits, bins = pandas.qcut(self.data_densities, nsplits, labels=labels, retbins=True)
+        if bins is None:
+            # Use quantiles
+            splits, bins = pandas.qcut(self.data_densities, nsplits, labels=labels, retbins=True)
+        else:
+            # Check consistency between nsplits and bins
+            if nsplits + 1 == len(bins):
+                # Use predefined bins
+                splits, bins = pandas.cut(self.data_densities, bins, labels=labels, retbins=True)
+            else:
+                raise ValueError('bins must have length nsplits + 1.')
 
         split_mesh = np.empty(np.shape(self.density_mesh))
         split_indices = list()
@@ -145,7 +154,7 @@ class DensitySplit:
             split_indices.append(indices)
             split_densities.append(self.data_densities.T[indices].T)
             split_positions.append(self.data.positions.T[indices].T)
-            
+
             if self.data.positions_rsd is not None:
                 split_positions_rsd.append(self.data.positions_rsd.T[indices].T)
                 self.split_positions_rsd = split_positions_rsd

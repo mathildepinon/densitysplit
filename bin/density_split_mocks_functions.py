@@ -299,7 +299,7 @@ def generate_batch_2PCF(catalog, nmocks, nmesh, bias, edges,
 
 def generate_batch_densitySplit_CCF(catalog, nmocks, nmesh, bias,
                                     cellsize, resampler, nsplits, use_rsd,
-                                    randoms_size, edges, los, f=None, rsd=False, use_weights=False, 
+                                    randoms_size, edges, los, f=None, rsd=False, use_weights=False,
                                     nbar=None, bins=None,
                                     nthreads=128,
                                     batch_size=None, batch_index=0,

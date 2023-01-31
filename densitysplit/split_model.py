@@ -10,14 +10,22 @@ from pmesh import ParticleMesh
 from functools import reduce # Valid in Python 2.6+, required in Python 3
 from operator import mul
 from pypower.fft_power import project_to_basis
-from .edgeworth_development import cumulant_from_moments
+from .edgeworth_development import cumulant_from_moments, ExpandedNormal
+
+
+def damping_function(k, k_lambda, sigma_lambda):
+    if k < k_lambda:
+        return 1
+    else:
+        return np.exp(-(k-k_lambda)**2/(2*sigma_lambda**2))
+
 
 class SplitCCFModel:
     """
     Class implementing analytical model for density split cross-correlation functions.
     """
 
-    def __init__(self, k, redshift, cosmology, pk=None, bias=1, nsplits=1, smoothing_scale=10, shot_noise=0, nbar=0.01):
+    def __init__(self, redshift, cosmology, k=np.logspace(-5, 3, 100000), pk=None, bias=1, nsplits=1, smoothing_scale=10, shot_noise=0, nbar=0.01, boxsize=1000, nmesh=512):
         self.k = k
         self.redshift = redshift
         self.cosmology = cosmology
@@ -25,18 +33,22 @@ class SplitCCFModel:
         self.shot_noise = shot_noise
         self.nbar = nbar
         self.s = np.linspace(0., 150., 151)
-        self.boxsize = 1000
-        self.nmesh = 512
+        self.boxsize = boxsize
+        self.nmesh = nmesh
         self.pm = ParticleMesh(BoxSize=[self.boxsize] * 3, Nmesh=[self.nmesh] * 3, dtype='c16')
         if pk is None:
             fo = Fourier(self.cosmology, engine='camb')
-            pk = fo.pk_interpolator(nonlinear=False, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
+            pklin = fo.pk_interpolator(nonlinear=False, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
+            pklin_array = pklin(k)
+            kN = np.pi*nmesh/boxsize
+            pkdamped_func = lambda k: pklin(k) * np.array([damping_function(kk, 0.8*kN, 0.05*kN) for kk in k])
+            pk = PowerSpectrumInterpolator1D.from_callable(k, pkdamped_func)
         self.pk = pk
         self.set_pk_3D()
-        self.set_smoothing_scale(smoothing_scale)
-        #self.set_smoothed_pk_3D()
         self.set_xi_model()
         self.compute_sigma()
+        self.set_smoothing_scale(smoothing_scale)
+        #self.set_smoothed_pk_3D()
         #self.compute_xi_R()
         #self.compute_sigma_R()
         #self.compute_sigma_RR()
@@ -62,20 +74,28 @@ class SplitCCFModel:
             delta_slab[...].flat = (self.bias**2 * pk + self.shot_noise) * norm
         self.pk_3D = cfield
 
-    def smoothing_kernel(self, k):
-        res = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
-        return res
+    # def smoothing_kernel(self, k):
+    #     res = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
+    #     return res
+    #
+    # def isotropic_smoothing_kernel_3D(self):
+    #     cfield = self.pm.create('complex')
+    #     for kslab, w_slab in zip(cfield.slabs.x, cfield.slabs):
+    #         k2 = sum(kk**2 for kk in kslab)
+    #         k = (k2**0.5).ravel()
+    #         w = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
+    #         w_slab[...].flat = w
+    #     return cfield
 
-    def isotropic_smoothing_kernel_3D(self):
-        cfield = self.pm.create('complex')
-        for kslab, w_slab in zip(cfield.slabs.x, cfield.slabs):
-            k2 = sum(kk**2 for kk in kslab)
-            k = (k2**0.5).ravel()
-            w = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
-            w_slab[...].flat = w
-        return cfield
+    def set_smoothing_scale(self, smoothing_scale):
+        self.smoothing_scale = smoothing_scale
+        self.set_smoothing_kernel_3D()
+        self.set_smoothed_pk_3D()
+        self.compute_xi_R()
+        self.compute_sigma_R()
+        self.compute_sigma_RR()
 
-    def smoothing_kernel_3D(self):
+    def set_smoothing_kernel_3D(self):
         cfield = self.pm.create('complex')
         for kslab, w_slab in zip(cfield.slabs.x, cfield.slabs):
             # k2 = sum(kk**2 for kk in kslab)
@@ -83,14 +103,14 @@ class SplitCCFModel:
             w = reduce(mul, (np.sinc(self.smoothing_scale * kk / 2. / np.pi)**6 for kk in kslab), 1)
             # w = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
             w_slab[...].flat = w
-        return cfield
+        self.smoothing_kernel_3D = cfield
 
     def set_smoothed_pk_3D(self):
-        self.smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D()
-        self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D()**2
+        self.smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D
+        self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D**2
 
     def smoothed_shot_noise_cumulant(self, p):
-        fourier_kernel = self.smoothing_kernel_3D()
+        fourier_kernel = self.smoothing_kernel_3D
         norm_fourier_kernel = fourier_kernel / fourier_kernel.BoxSize.prod()
         real_space_kernel = norm_fourier_kernel.c2r()
         real_space_kernel.value = np.real(real_space_kernel.value)
@@ -98,7 +118,7 @@ class SplitCCFModel:
         return self.nbar * intg
 
     def smoothed_density_moments(self):
-        fourier_kernel = self.smoothing_kernel_3D()
+        fourier_kernel = self.smoothing_kernel_3D
         norm_fourier_kernel = fourier_kernel / self.boxsize**3
         real_space_kernel = norm_fourier_kernel.c2r()
         real_space_kernel.value = np.real(real_space_kernel.value)
@@ -110,7 +130,7 @@ class SplitCCFModel:
         ## where delta is Gaussian and p follows a Poisson distribution of parameter nbar
         w1 = integrate_pmesh_field(real_space_kernel) ## should be 1
         res1 = w1
-        print(res1)
+        #print(res1)
 
         ## p=2
         w2 = integrate_pmesh_field(real_space_kernel**2)
@@ -118,7 +138,7 @@ class SplitCCFModel:
         m2 = self.sigma**2 / self.nbar * w2 + self.sigma_RR**2
         ## second order moment of (1 + delta)*p/nbar
         res2 = m2 + w1**2 + w2 / self.nbar
-        print(res2)
+        #print(res2)
 
         ## p=3
         w3 = integrate_pmesh_field(real_space_kernel**3)
@@ -129,7 +149,7 @@ class SplitCCFModel:
             + 6 * w2_xiR / self.nbar \
             + w1**3 \
             + 3 * w1 * self.sigma_RR**2
-        print(res3)
+        #print(res3)
 
         ## p=4
         w4 = integrate_pmesh_field(real_space_kernel**4)
@@ -154,22 +174,45 @@ class SplitCCFModel:
         fourier_aux = fourier_squared_kernel * self.pk_3D
         aux = integrate_pmesh_field(squared_real_kernel * fourier_aux.c2r()) * self.boxsize**3
         term4_bis = 4 * aux + 2 * term4
-        res4 = 3 * (1 + 2*self.sigma**2 + self.sigma**4) * w4 / self.nbar**3 \
-            + 12 * (1 + self.sigma**2) * (w3 * w1 + w3_xiR) / self.nbar**2 \
-            + 3 * ((3 + 2 * self.sigma**2 + self.sigma**4) * w2**2 + term4_bis) / self.nbar**2 \
-            + 6 * ((3 + self.sigma**2) * w2 * w1**2 + (1 + self.sigma**2) * w2 * self.sigma_RR**2 + 4 * w1 * w2_xiR \
-            + 2 * w2_xiR2) / self.nbar \
-            + 3 * (w1**4 + 2 * w1**2 * self.sigma_RR**2 + self.sigma_RR**4)
-        print(res4)
+        # res4 = 3 * (1 + 2*self.sigma**2 + self.sigma**4) * w4 / self.nbar**3 \
+        #     + 12 * (1 + self.sigma**2) * (w3 * w1 + w3_xiR) / self.nbar**2 \
+        #     + 3 * ((3 + 2 * self.sigma**2 + self.sigma**4) * w2**2 + term4_bis) / self.nbar**2 \
+        #     + 6 * ((3 + self.sigma**2) * w2 * w1**2 + (1 + self.sigma**2) * w2 * self.sigma_RR**2 + 4 * w1 * w2_xiR \
+        #     + 2 * w2_xiR2) / self.nbar \
+        #     + 3 * (w1**4 + 2 * w1**2 * self.sigma_RR**2 + self.sigma_RR**4)
+
+        res4 = m4 \
+           + (1 + 6. * self.sigma**2) * w4 / self.nbar**3 \
+           + 4 * (w3 * (1 + 3 * self.sigma**2) + 3 * w3_xiR) / self.nbar**2 \
+           + 3. * (w2**2 + 2 * self.sigma**2 * w2**2 + 4. * aux) / self.nbar**2 \
+           + 6. * ((1. + self.sigma**2) * w2 * w1**2 + 4. * w2_xiR * w1 + self.sigma_RR**2 * w2) / self.nbar \
+           + w1**4 + 6. * self.sigma_RR**2 * w1**2
+
+        #print(res4)
 
         res = [res1, res2, res3, res4]
+        #res = [0, m2, 0, m4]
         self.density_moments = res
 
         return res
 
-    def smoothed_density_cumulant(self, p):
-        moments = self.smoothed_density_moments()
-        return float(cumulant_from_moments(moments[0:p], p))
+
+    def smoothed_density_cumulant(self, p=4):
+        if hasattr(self, 'density_moments') and len(self.density_moments) >= p:
+            moments = self.density_moments
+        else:
+            moments = self.smoothed_density_moments()
+        if p==1:
+            res = float(cumulant_from_moments(moments[0:1], 1)) - 1.
+        else:
+            res = float(cumulant_from_moments(moments[0:p], p))
+        return res
+
+    def density_with_shot_noise(self, delta, p=4):
+        """Density PDF inlcuding shot noise using Edgeworth development from cumulants"""
+        cumulants = [self.smoothed_density_cumulant(i+1) for i in range(p)]
+        edgew = ExpandedNormal(cum=cumulants)
+        return edgew.pdf(delta)
 
     def set_xi_model(self):
         # powerToCorrelation = PowerToCorrelation(self.k)
@@ -199,23 +242,37 @@ class SplitCCFModel:
 
         return self.sigma
 
-    def set_smoothing_scale(self, smoothing_scale):
-        self.smoothing_scale = smoothing_scale
-        self.set_smoothed_pk_3D()
-        self.compute_xi_R()
-        self.compute_sigma_R()
-        self.compute_sigma_RR()
 
     def compute_xi_R(self):
         # self.sep = sep
         # powerToCorrelation = PowerToCorrelation(self.k)
         # sep, xi = powerToCorrelation((self.bias**2 * self.pk(self.k) + self.shot_noise) * self.smoothing_kernel(self.k))
         # self.xi_R = CorrelationFunctionInterpolator1D(sep, xi=xi)
-        xifield = self.smoothed_pk_3D.c2r()
-        xifield.value = np.real(xifield.value)
-        sep, mu, xi = project_to_basis(xifield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
-        self.xi_R = np.real(xi)
-        return self.xi_R
+        xiRfield = self.smoothed_pk_3D.c2r()
+        xiRfield.value = np.real(xiRfield.value)
+        sep, mu, xiR = project_to_basis(xiRfield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+        xi_R = np.real(xiR)
+        self.xi_R = xi_R
+
+        xiRRfield = self.double_smoothed_pk_3D.c2r()
+        xiRRfield.value = np.real(xiRRfield.value)
+        sep, mu, xiRR = project_to_basis(xiRRfield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+        xi_RR = np.real(xiRR)
+        self.xi_RR = xi_RR
+
+        ## Shot noise correction for xi_R
+        wfield = self.smoothing_kernel_3D.c2r() / self.boxsize**3
+        sep, mu, w = project_to_basis(wfield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+        shot_noise_correction = (1 + self.sigma**2) * w / self.nbar
+        self.xi_R_with_shot_noise = xi_R + np.real(shot_noise_correction)
+
+        ## Shot noise correction for xi_RR
+        sep, mu, w = project_to_basis(wfield**2, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+        shot_noise_correction = (1 + self.sigma**2) * w / self.nbar
+        self.xi_RR_with_shot_noise = xi_RR + np.real(shot_noise_correction)
+
+        return self.xi_R_with_shot_noise
+
 
     def compute_sigma_R(self):
         # u = np.linspace(-5., 3., 100000)
@@ -223,9 +280,12 @@ class SplitCCFModel:
         # dk = (u[1] - u[0]) * k
         # integrand = k**2 / (2 * np.pi**2) * (self.bias**2 * self.pk(k) + self.shot_noise) * self.smoothing_kernel(k)
         # val = np.trapz(integrand, k, dk)
-        val = self.xi_R[0]
-        self.sigma_R = np.sqrt(val)
+        val1 = self.xi_R[0]
+        self.sigma_R = np.sqrt(val1)
+        val2 = self.xi_R_with_shot_noise[0]
+        self.sigma_R_with_shot_noise = np.sqrt(val2)
         return self.sigma_R
+
 
     def compute_sigma_RR(self):
         # u = np.linspace(-5., 3., 100000)
@@ -240,52 +300,190 @@ class SplitCCFModel:
         self.sigma_RR = np.sqrt(val)
         return self.sigma_RR
 
-    def compute_delta_tilde(self, density_bins):
-        prefactor = -np.sqrt(2/np.pi)*self.sigma_RR
+
+    def compute_delta_tilde(self, density_bins, shot_noise=False, p=4):
+        self.density_bins = density_bins
+        self.nsplits = len(density_bins)-1
+        res = list()
+        if shot_noise:
+            for i in range(len(density_bins) - 1):
+                d1 = density_bins[i]
+                d2 = density_bins[i+1]
+                if not math.isfinite(d1):
+                    d1 = -100
+                if not math.isfinite(d2):
+                    d2 = 100
+                delta = np.linspace(d1, d2, 1000)
+                pdf = self.density_with_shot_noise(delta, p)
+                integrand1 = pdf
+                integrand2 = delta * pdf
+                integral1 = np.trapz(integrand1, delta)
+                integral2 = np.trapz(integrand2, delta)
+                res.append(integral2 / integral1)
+        else:
+            prefactor = -np.sqrt(2/np.pi)*self.sigma_RR
+            for i in range(len(density_bins) - 1):
+                d1 = density_bins[i]
+                d2 = density_bins[i+1]
+                num = np.exp(- d2**2 / (2 * self.sigma_RR**2)) - np.exp(- d1**2 / (2 * self.sigma_RR**2))
+                denom = math.erf(d2 / (np.sqrt(2) * self.sigma_RR)) - math.erf(d1 / (np.sqrt(2) * self.sigma_RR))
+                res.append(prefactor * num/denom)
+        self.delta_tilde = np.array(res)
+        return np.array(res)
+
+
+    def compute_delta2_tilde(self, density_bins, shot_noise=False, p=4):
         self.density_bins = density_bins
         self.nsplits = len(density_bins)-1
         res = list()
         for i in range(len(density_bins) - 1):
             d1 = density_bins[i]
             d2 = density_bins[i+1]
-            num = np.exp(- d2**2 / (2 * self.sigma_RR**2)) - np.exp(- d1**2 / (2 * self.sigma_RR**2))
-            denom = math.erf(d2 / (np.sqrt(2) * self.sigma_RR)) - math.erf(d1 / (np.sqrt(2) * self.sigma_RR))
-            res.append(prefactor * num/denom)
+            if not math.isfinite(d1):
+                d1 = -100
+            if not math.isfinite(d2):
+                d2 = 100
+            delta = np.linspace(d1, d2, 10000)
+            if shot_noise:
+                pdf = self.density_with_shot_noise(delta, p)
+            else:
+                pdf = self.stats.norm.pdf(delta, 0, self.sigma_RR)
+            integrand1 = pdf
+            integrand2 = delta**2 * pdf
+            integral1 = np.trapz(integrand1, delta)
+            integral2 = np.trapz(integrand2, delta)
+            res.append(integral2 / integral1)
+        self.delta2_tilde = np.array(res)
         return np.array(res)
 
-    def ccf_randoms_tracers(self, density_bins):
-        prefactor = - np.sqrt(2/np.pi) * self.xi_R/self.sigma_RR
+
+    def ccf_randoms_tracers(self, density_bins, shot_noise=False, p=4):
         res = list()
         self.density_bins = density_bins
         self.nsplits = len(density_bins)-1
+        if shot_noise:
+            if not hasattr(self, 'density_moments'):
+                self.smoothed_density_moments()
+
+            xi_R = self.xi_R_with_shot_noise
+            sigma_RR = np.sqrt(self.density_moments[1]-1)
+            prefactor = - np.sqrt(2/np.pi) * xi_R/sigma_RR
+            split_delta_tilde = self.compute_delta_tilde(density_bins, shot_noise, p)
+            for i in range(len(density_bins) - 1):
+                res.append(xi_R / sigma_RR**2 * split_delta_tilde[i])
+        else:
+            xi_R = self.xi_R
+            sigma_RR = self.sigma_RR
+            prefactor = - np.sqrt(2/np.pi) * xi_R/sigma_RR
+            for i in range(len(density_bins) - 1):
+                d1 = density_bins[i]
+                d2 = density_bins[i+1]
+                num = np.exp(- d2**2 / (2 * sigma_RR**2)) - np.exp(- d1**2 / (2 * sigma_RR**2))
+                denom = math.erf(d2 / (np.sqrt(2) * sigma_RR)) - math.erf(d1 / (np.sqrt(2) * sigma_RR))
+                res.append(prefactor * num/denom)
+        return np.array(res)
+
+
+    def acf_randoms(self, density_bins, shot_noise=False):
+        mvn = scipy.stats.multivariate_normal
+        cf = list()
+        self.density_bins = density_bins
+        self.nsplits = len(density_bins)-1
+        if shot_noise:
+            if not hasattr(self, 'density_moments'):
+                self.smoothed_density_moments()
+            xi_RR = self.xi_RR_with_shot_noise
+            sigma_RR = np.sqrt(self.density_moments[1]-1)
+        else:
+            xi_RR = self.xi_RR
+            sigma_RR = self.sigma_RR
+        for i in range(len(density_bins) - 1):
+            res = list()
+            ## NB: starting from idx=1 because sigma_RR**2 == xi_RR[0]
+            for idx in range(1, len(self.sep)):
+                cov = np.array([[float(sigma_RR**2), float(xi_RR[idx])],
+                                [float(xi_RR[idx]), float(sigma_RR**2)]])
+                d1 = density_bins[i]
+                d2 = density_bins[i+1]
+                # cdf is not defined at -inf, but the pdf is symmetrical
+                if not math.isfinite(d1):
+                    d1, d2 = -d2, -d1
+                cdf = mvn.cdf(np.array([d2, d2]), cov=cov) - mvn.cdf(np.array([d1, d2]), cov=cov) - mvn.cdf(np.array([d2, d1]), cov=cov) + mvn.cdf(np.array([d1, d1]), cov=cov)
+                denom = scipy.special.erf(d2 / (np.sqrt(2) * sigma_RR)) - scipy.special.erf(d1 / (np.sqrt(2) * sigma_RR))
+                res.append(4 * cdf/denom**2 - 1)
+            cf.append(np.array(res))
+        return np.array(cf)
+
+
+    def nbar_R_DS(self, density_bins, shot_noise=False, p=4):
+        res = list()
+        self.density_bins = density_bins
+        self.nsplits = len(density_bins)-1
+
+        if not hasattr(self, 'density_moments'):
+            self.smoothed_density_moments()
+
+        split_delta_tilde = self.compute_delta_tilde(density_bins, shot_noise, p)
+
+        if shot_noise:
+            xi_R = self.xi_R_with_shot_noise
+            sigma_R = self.sigma_R_with_shot_noise
+            sigma_RR = np.sqrt(self.density_moments[1]-1)
+        else:
+            xi_R = self.xi_R
+            sigma_R = self.sigma_R
+            sigma_RR = self.sigma_RR
         for i in range(len(density_bins) - 1):
             d1 = density_bins[i]
             d2 = density_bins[i+1]
-            num = np.exp(- d2**2 / (2 * self.sigma_RR**2)) - np.exp(- d1**2 / (2 * self.sigma_RR**2))
-            denom = math.erf(d2 / (np.sqrt(2) * self.sigma_RR)) - math.erf(d1 / (np.sqrt(2) * self.sigma_RR))
-            res.append(prefactor * num/denom)
+            if not math.isfinite(d1):
+                d1 = -100
+            if not math.isfinite(d2):
+                d2 = 100
+            delta = np.linspace(d1, d2, 1000)
+            pdf = self.density_with_shot_noise(delta, p)
+            integral = np.trapz(pdf, delta)
+            res.append(float(integral * (1 + sigma_R**2 / sigma_RR**2 * split_delta_tilde[i])))
         return np.array(res)
 
-    def ccf_tracers(self, density_bins):
+
+    def ccf_tracers(self, density_bins, shot_noise=False, p=4):
         prefactor_num = np.sqrt(2/np.pi) * self.xi_R / (self.sigma_RR * self.xi)
         prefactor_denom = np.sqrt(2/np.pi) * self.sigma_R**2 / self.sigma_RR
         res = list()
         self.density_bins = density_bins
         self.nsplits = len(density_bins)-1
-        for i in range(len(density_bins) - 1):
-            d1 = density_bins[i]
-            d2 = density_bins[i+1]
-            delta1 = np.exp(- d2**2 / (2 * self.sigma_RR**2)) - np.exp(- d1**2 / (2 * self.sigma_RR**2))
-            ## Handle the case where d1 or d2 is infinite
-            if math.isfinite(d1):
-                a = d1 * np.exp(- d1**2 / (2 * self.sigma_RR**2))
-            else:
-                a = 0
-            if math.isfinite(d2):
-                b = d2 * np.exp(- d2**2 / (2 * self.sigma_RR**2))
-            else:
-                b = 0
-            delta2 = self.sigma_R**2 / self.sigma_RR**2 * (b - a)
-            delta3 = math.erf(d2 / (np.sqrt(2) * self.sigma_RR)) - math.erf(d1 / (np.sqrt(2) * self.sigma_RR))
-            res.append(self.xi * (1 - prefactor_num * (delta1 + delta2) / delta3) / (1 - prefactor_denom * delta1 / delta3))
+
+        if not hasattr(self, 'density_moments'):
+            self.smoothed_density_moments()
+
+        if shot_noise:
+            xi_R = self.xi_R_with_shot_noise
+            sigma_R = self.sigma_R_with_shot_noise
+            sigma_RR = np.sqrt(self.density_moments[1]-1)
+            split_delta_tilde = self.compute_delta_tilde(density_bins, shot_noise, p)
+            split_delta2_tilde = self.compute_delta2_tilde(density_bins, shot_noise, p)
+
+            for i in range(len(density_bins) - 1):
+                denom = 1 + sigma_R**2 * split_delta_tilde[i] / sigma_RR**2
+                num = self.xi + xi_R / sigma_RR**2 * (split_delta_tilde[i] - sigma_R**2 + sigma_R**2 * split_delta2_tilde[i] / sigma_RR**2)
+                res.append(num/denom)
+
+        else:
+            for i in range(len(density_bins) - 1):
+                d1 = density_bins[i]
+                d2 = density_bins[i+1]
+                delta1 = np.exp(- d2**2 / (2 * self.sigma_RR**2)) - np.exp(- d1**2 / (2 * self.sigma_RR**2))
+                ## Handle the case where d1 or d2 is infinite
+                if math.isfinite(d1):
+                    a = d1 * np.exp(- d1**2 / (2 * self.sigma_RR**2))
+                else:
+                    a = 0
+                if math.isfinite(d2):
+                    b = d2 * np.exp(- d2**2 / (2 * self.sigma_RR**2))
+                else:
+                    b = 0
+                delta2 = self.sigma_R**2 / self.sigma_RR**2 * (b - a)
+                delta3 = math.erf(d2 / (np.sqrt(2) * self.sigma_RR)) - math.erf(d1 / (np.sqrt(2) * self.sigma_RR))
+                res.append(self.xi * (1 - prefactor_num * (delta1 + delta2) / delta3) / (1 - prefactor_denom * delta1 / delta3))
         return np.array(res)

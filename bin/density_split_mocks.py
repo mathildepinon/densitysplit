@@ -49,7 +49,7 @@ los = 'x'
 # Mocks
 nmocks = 5000
 nmesh = 512
-nbar = catalog.size/catalog.boxsize**3
+nbar = 0.01 #catalog.size/catalog.boxsize**3
 
 # For RSD
 cosmology=fiducial.AbacusSummitBase()
@@ -61,9 +61,9 @@ hz = 100*bg.efunc(catalog.redshift)
 catalog.set_rsd(hz=hz)
 
 # Generate mocks and save them
-generate_N_mocks(catalog, nmocks=40, nmesh=nmesh,
+generate_N_mocks(catalog, nmocks=10, nmesh=nmesh,
                  bias=bias,
-                 rsd=False, los=los, f=f, nbar=5*nbar,
+                 rsd=False, los=los, f=f, nbar=nbar,
                  output_dir=output_dir+'mocks/gaussian/', mpi=True, overwrite=True,
                  type = 'gaussian')
 
