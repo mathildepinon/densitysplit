@@ -100,19 +100,20 @@ def generate_batch_xi_R(edges, nmocks, nmesh, boxsize, boxcenter,
 
 def main():
     # Output directory for generated mocks
-    output_dir = '/feynman/work/dphp/mp270220/outputs/mocks/gaussian/'
+    # output_dir = '/feynman/work/dphp/mp270220/outputs/mocks/gaussian/'
+    output_dir = '/feynman/work/dphp/mp270220/outputs/mocks/lognormal/'
 
     # Mock parameters
     boxsize = 2000
     boxcenter = 1000
     nmesh = 1024
-    nbar = 0.001
+    #nbar = 0.003
     cosmology=fiducial.AbacusSummitBase()
-    z = 1.175
-    bias = 1.8
+    #z = 1.175
+    #bias = 1.8
 
     # Mocks
-    nmocks = 100
+    nmocks = 10
 
     # For RSD
     # bg = cosmology.get_background()
@@ -123,35 +124,49 @@ def main():
     cellsize = 10
     resampler = 'tsc'
 
+    #mocks_list = list()
+    #name = 'gaussianMock_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(z, bias, boxsize, nmesh, nbar)
+    #name = 'lognormal_mock_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(z, bias, boxsize, nmesh, nbar)
+
+    #for i in range(nmocks):
+    #    filename = name+'_mock{:d}'.format(i)
+    #    mock = catalog_data.Data.load(output_dir+filename+'.npy')
+    #    mocks_list.append(mock)
+
+    #densities = compute_delta_R(mocks_list, cellsize, resampler, use_rsd=False, use_weights=True)
+    #name = '{:d}gaussianMocks_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
+    #name = '{:d}_lognormal_mocks_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
+    #np.save(output_dir+name+'_cellsize{:d}_resampler'.format(cellsize)+resampler+'_delta_R', densities)
+    
+    abacus_mock = catalog_data.Data.load('/feynman/work/dphp/mp270220/data/AbacusSummit_2Gpc_z1.175_ph003.npy')
+    abacus_density = compute_delta_R([abacus_mock], cellsize, resampler, use_rsd=False, use_weights=False)
+
+    np.save('/feynman/work/dphp/mp270220/data/AbacusSummit_2Gpc_z1.175_ph003_cellsize{:d}_resampler{}_delta_R'.format(cellsize, resampler), abacus_density[0])
+                
     # Edges (s, mu) to compute correlation function at
     edges = (np.linspace(0., 150., 151), np.linspace(-1, 1, 201))
     los = 'x'
+    
+    mock_density = density_split.DensitySplit(abacus_mock)
+    mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=False, use_weights=False)
+    print('Computing correlation function...')
+    mock_xi_R = compute_xi_R(mock_density, edges, seed=0, los=los, use_rsd=False, use_weights=False, nthreads=64)
 
-    # batch_index = int(sys.argv[1])
-    # batch_size = 10
+    #batch_index = int(sys.argv[1])
+    #batch_size = 1
 
-    mocks_list = list()
-    name = 'gaussianMock_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(z, bias, boxsize, nmesh, nbar)
-
-    for i in range(nmocks):
-        filename = name+'_mock{:d}'.format(i)
-        mock = catalog_data.Data.load(output_dir+filename+'.npy')
-        mocks_list.append(mock)
-
-    densities = compute_delta_R(mocks_list, cellsize, resampler, use_rsd=False, use_weights=True)
-    name = '{:d}gaussianMocks_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
-    np.save(output_dir+name+'_cellsize{:d}_resampler'.format(cellsize)+resampler+'_delta_R', densities)
-
-    # results = generate_batch_xi_R(edges, nmocks, nmesh, boxsize, boxcenter,
+    #results = generate_batch_xi_R(edges, nmocks, nmesh, boxsize, boxcenter,
     #                              nbar, cosmology=cosmology, z=z, bias=bias,
     #                              cellsize=cellsize, resampler=resampler,
     #                              los=los, rsd=False, use_rsd=False, use_weights=True,
     #                              nthreads=64, batch_size=batch_size, batch_index=batch_index,
-    #                              output_dir=output_dir, name='gaussianMock_pkdamped')
-    #
+    #                              output_dir=output_dir, name='lognormal_mock')
+    
     # name = '{:d}gaussianMocks_batch{:d}_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_size, batch_index, z, bias, boxsize, nmesh, nbar)
-    # output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
-    # np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R', results)
+    # name = 'lognormalMock{:d}_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_index, z, bias, boxsize, nmesh, nbar)
+    output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
+    #np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R', results)
+    np.save(output_dir+'AbacusSummit_2Gpc_z1.175_ph003'+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R', mock_xi_R)
 
 
 if __name__ == "__main__":

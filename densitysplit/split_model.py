@@ -25,7 +25,7 @@ class SplitCCFModel:
     Class implementing analytical model for density split cross-correlation functions.
     """
 
-    def __init__(self, redshift, cosmology, k=np.logspace(-5, 3, 100000), pk=None, bias=1, nsplits=1, smoothing_scale=10, shot_noise=0, nbar=0.01, boxsize=1000, nmesh=512):
+    def __init__(self, redshift, cosmology, k=np.logspace(-5, 3, 100000), pk=None, damping=False, bias=1, nsplits=1, smoothing_kernel=6, smoothing_scale=10, shot_noise=0, nbar=0.01, boxsize=1000, nmesh=512):
         self.k = k
         self.redshift = redshift
         self.cosmology = cosmology
@@ -38,14 +38,18 @@ class SplitCCFModel:
         self.pm = ParticleMesh(BoxSize=[self.boxsize] * 3, Nmesh=[self.nmesh] * 3, dtype='c16')
         if pk is None:
             fo = Fourier(self.cosmology, engine='camb')
-            pklin = fo.pk_interpolator(nonlinear=False, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
+            pklin = fo.pk_interpolator(non_linear=True, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
             pklin_array = pklin(k)
             kN = np.pi*nmesh/boxsize
-            pkdamped_func = lambda k: pklin(k) * np.array([damping_function(kk, 0.8*kN, 0.05*kN) for kk in k])
-            pk = PowerSpectrumInterpolator1D.from_callable(k, pkdamped_func)
+            if damping:
+                pkdamped_func = lambda k: pklin(k) * np.array([damping_function(kk, 0.8*kN, 0.05*kN) for kk in k])
+                pk = PowerSpectrumInterpolator1D.from_callable(k, pkdamped_func)
+            else:
+                pk = pklin
         self.pk = pk
         self.set_pk_3D()
         self.set_xi_model()
+        self.smoothing_kernel = smoothing_kernel
         self.compute_sigma()
         self.set_smoothing_scale(smoothing_scale)
         #self.set_smoothed_pk_3D()
@@ -96,11 +100,13 @@ class SplitCCFModel:
         self.compute_sigma_RR()
 
     def set_smoothing_kernel_3D(self):
+        # order of the smoothing kernel
+        p = self.smoothing_kernel
         cfield = self.pm.create('complex')
         for kslab, w_slab in zip(cfield.slabs.x, cfield.slabs):
             # k2 = sum(kk**2 for kk in kslab)
             # k = (k2**0.5).ravel()
-            w = reduce(mul, (np.sinc(self.smoothing_scale * kk / 2. / np.pi)**6 for kk in kslab), 1)
+            w = reduce(mul, (np.sinc(self.smoothing_scale * kk / 2. / np.pi)**p for kk in kslab), 1)
             # w = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
             w_slab[...].flat = w
         self.smoothing_kernel_3D = cfield
@@ -487,3 +493,9 @@ class SplitCCFModel:
                 delta3 = math.erf(d2 / (np.sqrt(2) * self.sigma_RR)) - math.erf(d1 / (np.sqrt(2) * self.sigma_RR))
                 res.append(self.xi * (1 - prefactor_num * (delta1 + delta2) / delta3) / (1 - prefactor_denom * delta1 / delta3))
         return np.array(res)
+    
+    
+    def compute_xi_Y_R(self):
+        self.xi_Y_R = np.log(1 + self.xi_R) - 1/4. * np.log(1 + self.sigma**2) * np.log(1 + self.sigma_RR**2) 
+        
+        return self.xi_Y_R

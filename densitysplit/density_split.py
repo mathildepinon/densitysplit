@@ -91,7 +91,7 @@ class DensitySplit:
             weights = None
             self.use_weights = False
             norm = data.size
-
+            
         mesh = CatalogMesh(data_positions=positions, data_weights=weights,
                            interlacing=0,
                            boxsize=self.boxsize, boxcenter=self.boxcenter,
@@ -110,7 +110,9 @@ class DensitySplit:
         # Get densities at each point
         #self.data_densities = density_mesh[tuple(positions_grid_indices.tolist())]
         shifted_positions = positions - self.offset
-        self.data_densities = density_mesh.readout(shifted_positions.T, resampler=resampler)
+        # resampler name conversions
+        resampler_conversions = {'ngp': 'nnb', 'cic': 'cic', 'tsc': 'tsc', 'pcs': 'pcs'}
+        self.data_densities = density_mesh.readout(shifted_positions.T, resampler=resampler_conversions[resampler])
 
         self.density_mesh = density_mesh
         self.cellsize = cellsize
