@@ -59,15 +59,14 @@ class Data:
     def set_rsd(self, positions_rsd=None, hz=None, los='x'):
         a = 1/(1+self.redshift)
 
-        los_indices = {'x':0, 'y':1, 'z':2}
-
         if positions_rsd is not None:
             self.rsd = True
             self.positions_rsd = positions_rsd
 
         elif hz is not None and self.velocities is not None:
             self.rsd = True
-            self.positions_rsd = (self.positions + self.velocities[los_indices[los]]/(a*hz) - self.offset) % self.boxsize + self.offset
+            vlos = np.array([1. * (los == axis) for axis in 'xyz'])
+            self.positions_rsd = (self.positions + (self.velocities * vlos[:, None])/(a*hz) - self.offset) % self.boxsize + self.offset
 
 
     def show_halos_map(self, fig, ax, cellsize, cut_direction, cut_idx, use_rsd=False, use_weights=False, **kwargs):

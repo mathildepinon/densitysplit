@@ -72,11 +72,12 @@ class DensitySplit:
             self.split_samples = [self.split_samples[i] + offset for i in range(len(self.split_samples))]
 
 
-    def compute_density(self, cellsize, resampler, use_rsd=False, use_weights=False):
+    def compute_density(self, cellsize, resampler, use_rsd=False, los=None, hz=None, use_weights=False):
 
         data = self.data
-
-        if use_rsd and data.positions_rsd is not None:
+        if use_rsd:
+            if data.positions_rsd is None:
+                data.set_rsd(hz=hz, los=los)
             positions = data.positions_rsd
             self.use_rsd = True
         else:

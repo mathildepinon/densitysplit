@@ -25,7 +25,7 @@ class SplitCCFModel:
     Class implementing analytical model for density split cross-correlation functions.
     """
 
-    def __init__(self, redshift, cosmology, k=np.logspace(-5, 3, 100000), pk=None, damping=False, bias=1, nsplits=1, smoothing_kernel=6, smoothing_scale=10, shot_noise=0, nbar=0.01, boxsize=1000, nmesh=512):
+    def __init__(self, redshift, cosmology, k=np.logspace(-5, 3, 100000), pk=None, rsd=False, mu=np.linspace(-1, 1, 400), non_linear=False, damping=False, bias=1, nsplits=1, smoothing_kernel=6, smoothing_scale=10, shot_noise=0, nbar=0.01, boxsize=1000, nmesh=512):
         self.k = k
         self.redshift = redshift
         self.cosmology = cosmology
@@ -38,7 +38,7 @@ class SplitCCFModel:
         self.pm = ParticleMesh(BoxSize=[self.boxsize] * 3, Nmesh=[self.nmesh] * 3, dtype='c16')
         if pk is None:
             fo = Fourier(self.cosmology, engine='camb')
-            pklin = fo.pk_interpolator(non_linear=True, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
+            pklin = fo.pk_interpolator(non_linear=non_linear, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
             pklin_array = pklin(k)
             kN = np.pi*nmesh/boxsize
             if damping:
@@ -47,6 +47,12 @@ class SplitCCFModel:
             else:
                 pk = pklin
         self.pk = pk
+        self.rsd = rsd
+        self.mu = mu
+        if rsd:
+            f = cosmology.get_background().growth_rate(redshift)
+            pk_rsd = (1 + f * mu**2)**2 * pklin_array[:, None]
+            self.pk_rsd = pk_rsd
         self.set_pk_3D()
         self.set_xi_model()
         self.smoothing_kernel = smoothing_kernel
@@ -77,6 +83,23 @@ class SplitCCFModel:
             pk[mask_nonzero] = self.pk(k[mask_nonzero])
             delta_slab[...].flat = (self.bias**2 * pk + self.shot_noise) * norm
         self.pk_3D = cfield
+
+    def set_pk_3D_RSD(self, mu, los='x'):
+        f = self.cosmology.get_background().growth_rate(self.redshift)
+        vlos = np.array([1. * (los == axis) for axis in 'xyz'])
+        # Generate P(k) on the mesh
+        cfield = self.pm.create('complex')
+        norm = 1 / self.pm.BoxSize.prod()
+        for kslab, delta_slab in zip(cfield.slabs.x, cfield.slabs):
+            # The square of the norm of k on the mesh
+            k2 = sum(kk**2 for kk in kslab)
+            k = (k2**0.5).ravel()
+            mask_nonzero = k != 0.
+            mu = kslab * vlos / k
+            pk = np.zeros_like(k)
+            pk[mask_nonzero] = self.pk(k[mask_nonzero])
+            delta_slab[...].flat = (self.bias**2 * (1 + f * mu**2)**2 * pk + self.shot_noise) * norm
+        self.pk_3D_RSD = cfield
 
     # def smoothing_kernel(self, k):
     #     res = np.sinc(self.smoothing_scale * k / 2. / np.pi)**6
@@ -230,6 +253,11 @@ class SplitCCFModel:
         self.sep = sep
         self.xi = xi
 
+    def set_xi_model_rsd(self, ells):
+        powerToCorrelation = PowerToCorrelation(self.k, ell=ells)
+        sep, xi = powerToCorrelation(self.bias**2 * (self.pk_rsd(self.k)))
+        self.xi_rsd = CorrelationFunctionInterpolator1D(sep, xi=xi)
+    
     def compute_sigma(self):
         ## 1st method: integrating 1D pk
         # u = np.linspace(-5., 3., 100000)
@@ -414,7 +442,7 @@ class SplitCCFModel:
                 # cdf is not defined at -inf, but the pdf is symmetrical
                 if not math.isfinite(d1):
                     d1, d2 = -d2, -d1
-                cdf = mvn.cdf(np.array([d2, d2]), cov=cov) - mvn.cdf(np.array([d1, d2]), cov=cov) - mvn.cdf(np.array([d2, d1]), cov=cov) + mvn.cdf(np.array([d1, d1]), cov=cov)
+                cdf = mvn.cdf(np.array([d2, np.inf]), cov=cov) - mvn.cdf(np.array([d1, d2]), cov=cov) - mvn.cdf(np.array([d2, d1]), cov=cov) + mvn.cdf(np.array([d1, d1]), cov=cov)
                 denom = scipy.special.erf(d2 / (np.sqrt(2) * sigma_RR)) - scipy.special.erf(d1 / (np.sqrt(2) * sigma_RR))
                 res.append(4 * cdf/denom**2 - 1)
             cf.append(np.array(res))
