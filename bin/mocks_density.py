@@ -15,13 +15,13 @@ from densitysplit import catalog_data, density_split
 setup_logging()
 
 
-def compute_delta_R(mocks, cellsize, resampler, use_rsd=False, use_weights=False):
+def compute_delta_R(mocks, cellsize, resampler, use_rsd=False, los=None, hz=None, use_weights=False):
     nmocks = len(mocks)
     mocks_densities = list()
     for i in range(nmocks):
         mock_catalog = mocks[i]
         mock_density = density_split.DensitySplit(mock_catalog)
-        mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=use_rsd, use_weights=use_weights)
+        mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=use_rsd, los=los, hz=hz, use_weights=use_weights)
         ## Generate random particles and readout density at each particle
         rng = np.random.RandomState(seed=i)
         positions = [o + rng.uniform(0., 1., mock_density.data.size)*b for o, b in zip((mock_density.offset,)*3, (mock_density.boxsize,)*3)]
@@ -31,10 +31,12 @@ def compute_delta_R(mocks, cellsize, resampler, use_rsd=False, use_weights=False
     return mocks_densities
 
 
-def compute_xi_R(data_density, edges, seed=0, los=None, use_rsd=False, use_weights=False, nthreads=128):
+def compute_xi_R(data_density, edges, seed=0, use_rsd=False, los=None, hz=None, use_weights=False, nthreads=128):
     data = data_density.data
 
-    if use_rsd and data.positions_rsd is not None:
+    if use_rsd:
+        if data.positions_rsd is None:
+            data.set_rsd(hz=hz, los=los)
         positions2 = data.positions_rsd
     else:
         positions2 = data.positions
@@ -109,16 +111,18 @@ def main():
     nmesh = 1024
     #nbar = 0.003
     cosmology=fiducial.AbacusSummitBase()
-    #z = 1.175
+    z = 0.8
     #bias = 1.8
 
     # Mocks
     nmocks = 10
 
     # For RSD
-    # bg = cosmology.get_background()
+    rsd = True
+    bg = cosmology.get_background()
     # f = bg.growth_rate(z)
-    # hz = 100*bg.efunc(z)
+    z = 1.175
+    hz = 100*bg.efunc(z)
 
     # Density smoothing parameters
     cellsize = 10
@@ -137,20 +141,22 @@ def main():
     #name = '{:d}gaussianMocks_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
     #name = '{:d}_lognormal_mocks_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
     #np.save(output_dir+name+'_cellsize{:d}_resampler'.format(cellsize)+resampler+'_delta_R', densities)
-    
-    abacus_mock = catalog_data.Data.load('/feynman/work/dphp/mp270220/data/AbacusSummit_2Gpc_z1.175_ph003.npy')
-    abacus_density = compute_delta_R([abacus_mock], cellsize, resampler, use_rsd=False, use_weights=False)
 
-    np.save('/feynman/work/dphp/mp270220/data/AbacusSummit_2Gpc_z1.175_ph003_cellsize{:d}_resampler{}_delta_R'.format(cellsize, resampler), abacus_density[0])
-                
     # Edges (s, mu) to compute correlation function at
     edges = (np.linspace(0., 150., 151), np.linspace(-1, 1, 201))
     los = 'x'
-    
-    mock_density = density_split.DensitySplit(abacus_mock)
-    mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=False, use_weights=False)
-    print('Computing correlation function...')
-    mock_xi_R = compute_xi_R(mock_density, edges, seed=0, los=los, use_rsd=False, use_weights=False, nthreads=64)
+
+    #name = 'AbacusSummit_2Gpc_z{:.3f}_downsampled_particles_nbar0.003'.format(z)
+    name = 'AbacusSummit_2Gpc_z{:.3f}_ph000'.format(z)
+    abacus_mock = catalog_data.Data.load('/feynman/scratch/dphp/mp270220/abacus/'+name+'.npy')
+    abacus_density = compute_delta_R([abacus_mock], cellsize, resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)[0]
+
+    np.save('/feynman/work/dphp/mp270220/outputs/density/'+name+'_cellsize{:d}_resampler{}_delta_R{}'.format(cellsize, resampler, '_RSD' if rsd else ''), abacus_density)
+                    
+    #mock_density = density_split.DensitySplit(abacus_mock)
+    #mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)
+    #print('Computing correlation function...')
+    #mock_xi_R = compute_xi_R(mock_density, edges, seed=0, use_rsd=rsd, los=los, hz=hz, use_weights=False, nthreads=64)
 
     #batch_index = int(sys.argv[1])
     #batch_size = 1
@@ -164,9 +170,9 @@ def main():
     
     # name = '{:d}gaussianMocks_batch{:d}_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_size, batch_index, z, bias, boxsize, nmesh, nbar)
     # name = 'lognormalMock{:d}_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_index, z, bias, boxsize, nmesh, nbar)
-    output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
+    #output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
     #np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R', results)
-    np.save(output_dir+'AbacusSummit_2Gpc_z1.175_ph003'+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R', mock_xi_R)
+    #np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R{}'.format('_RSD' if rsd else ''), mock_xi_R)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ import sys
 import copy
 
 import numpy as np
+from scipy.optimize import minimize
+from scipy.stats import lognorm
 
 from cosmoprimo import *
 from pycorr import TwoPointCorrelationFunction, setup_logging
@@ -15,10 +17,12 @@ from densitysplit import catalog_data, density_split
 setup_logging()
 
 
-def compute_densitySplit_CCF(data_density_splits, edges, los=None, use_rsd=False, use_weights=False, seed=0, output_dir='', randoms_size=1, nthreads=128):
+def compute_densitySplit_CCF(data_density_splits, edges, use_rsd=False, los=None, hz=None, use_weights=False, seed=0, output_dir='', randoms_size=1, nthreads=128):
     data = data_density_splits.data
 
-    if use_rsd and data.positions_rsd is not None:
+    if use_rsd:
+        if data.positions_rsd is None:
+            data.set_rsd(hz=hz, los=los)
         positions = data.positions_rsd
         split_positions = data_density_splits.split_positions_rsd
     else:
@@ -142,6 +146,20 @@ def generate_batch_densitySplit_CCF(edges, nmocks, nmesh, boxsize, boxcenter,
 
     # return results_hh_auto, results_hh_cross, results_rh
     return results_rh
+    
+
+def compute_lognormal_split_bins(delta_R, nsplits):
+    m2 = np.mean(delta_R**2)
+    m3 = np.mean(delta_R**3)
+    def tomin(delta0):
+        return (m3 - 3/delta0 * m2**2 - 1/delta0**3 * m2**3)**2
+    res = minimize(tomin, x0=1.)
+    delta0 = res.x[0]
+    sigma = np.sqrt(np.log(1 + m2/res.x[0]**2))
+    splits = np.linspace(0, 1, nsplits+1)
+    bins = lognorm.ppf(splits, sigma, -delta0, delta0*np.exp(-sigma**2/2.))
+    bins[0] = -1
+    return bins
 
 
 def main():
@@ -151,19 +169,20 @@ def main():
     # Mock parameters
     boxsize = 2000
     boxcenter = 1000
-    nmesh = 1024
+    #nmesh = 1024
     #nbar = 0.01
     cosmology=fiducial.AbacusSummitBase()
-    #z = 1.
     #bias = 1.
 
     # Mocks
     nmocks = 10
 
     # For RSD
-    # bg = cosmology.get_background()
+    rsd = True
+    bg = cosmology.get_background()
     # f = bg.growth_rate(z)
-    # hz = 100*bg.efunc(z)
+    z = 1.175
+    hz = 100*bg.efunc(z)
 
     # Density smoothing parameters
     cellsize = 10
@@ -179,34 +198,41 @@ def main():
     # gaussian
     # bins = np.array([-np.inf, -0.21875857,  0.21875857, np.inf])
     # lognormal
-    #bins = np.array([-1., -0.18346272,  0.09637895, np.inf])
-    bins = np.array([-1, -0.29346216, 0.14210049, np.inf]) # for z = 1.175
+    #bins = np.array([-1., -0.18346272,  0.09637895, np.inf]) # real space (z=0.8, particles nbar=0.003, cellsize=10, resampler='tsc')
+    #bins = np.array([-1, -0.29346216, 0.14210049, np.inf]) # real space (z = 1.175, halos, cellsize=10, resampler='tsc')
+    #bins = np.array([-1., -0.23735369,  0.10243512, np.inf]) # redshift space (z=0.8, particles nbar=0.003, cellsize=10, resampler='tsc')
 
-    name = 'AbacusSummit_2Gpc_z1.175_ph003'
-    abacus_mock = catalog_data.Data.load('/feynman/work/dphp/mp270220/data/'+name+'.npy')
-    mock_density = density_split.DensitySplit(abacus_mock)
-    mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=False, use_weights=False)
-    mock_density.split_density(nsplits, bins=bins)
-    results_rh = compute_densitySplit_CCF(mock_density, edges, los, use_rsd=False, use_weights=False, seed=0, randoms_size=randoms_size, nthreads=32)
+    for i in range(25):
+        name = 'AbacusSummit_2Gpc_z{:.3f}_ph0{{:02d}}'.format(z)
+        print(name.format(i))
+        delta_R = np.load('/feynman/work/dphp/mp270220/outputs/density/'+name.format(0)+'_cellsize{:d}_resampler{}_delta_R{}.npy'.format(cellsize, resampler, '_RSD' if rsd else ''))
+        bins = compute_lognormal_split_bins(delta_R, nsplits)
+        print('Computing density splits in bins: ', bins)
     
-    #batch_size = 1
-    #batch_index = int(sys.argv[1])
-
-    #results_rh = generate_batch_densitySplit_CCF(edges, nmocks, nmesh, boxsize, boxcenter,
-    #                                             nbar, cosmology, z, bias,
-    #                                             cellsize, resampler, nsplits, bins, randoms_size,
-    #                                             los=los, rsd=False, use_rsd=False, use_weights=True,
-    #                                             nthreads=64, batch_size=batch_size, batch_index=batch_index,
-    #                                             output_dir=output_dir, name='lognormal_mock')
-
-    output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
-    #name = 'lognormal_mock{:d}_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_index, z, bias, boxsize, nmesh, nbar)
+        abacus_mock = catalog_data.Data.load('/feynman/scratch/dphp/mp270220/abacus/'+name.format(i)+'.npy')
+        mock_density = density_split.DensitySplit(abacus_mock)
+        mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)
+        mock_density.split_density(nsplits, bins=bins)
+        results_rh = compute_densitySplit_CCF(mock_density, edges, use_rsd=rsd, los=los, hz=hz, use_weights=False, seed=0, randoms_size=randoms_size, nthreads=32)
+        
+        #batch_size = 1
+        #batch_index = int(sys.argv[1])
     
-    # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_HH_autoCF', results_hh_auto)
-    # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_HH_crossCF', results_hh_cross)
-    np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_RH_CCF', results_rh)
-    # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_HH_CCF', results_hh)
-    # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_RR_CCF', results_rr)
+        #results_rh = generate_batch_densitySplit_CCF(edges, nmocks, nmesh, boxsize, boxcenter,
+        #                                             nbar, cosmology, z, bias,
+        #                                             cellsize, resampler, nsplits, bins, randoms_size,
+        #                                             los=los, rsd=False, use_rsd=False, use_weights=True,
+        #                                             nthreads=64, batch_size=batch_size, batch_index=batch_index,
+        #                                             output_dir=output_dir, name='lognormal_mock')
+    
+        output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
+        #name = 'lognormal_mock{:d}_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_index, z, bias, boxsize, nmesh, nbar)
+        
+        # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_HH_autoCF', results_hh_auto)
+        # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_HH_crossCF', results_hh_cross)
+        np.save(output_dir+name.format(i)+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_RH_CCF{}'.format('_RSD' if rsd else ''), results_rh)
+        # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_HH_CCF', results_hh)
+        # np.save(output_dir+name+'_cellsize{:d}_resampler{}_{:d}splits_randoms_size{:d}'.format(cellsize, resampler, nsplits, randoms_size)+'_RR_CCF', results_rr)
 
 if __name__ == "__main__":
     main()
