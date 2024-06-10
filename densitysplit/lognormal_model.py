@@ -5,6 +5,7 @@ import logging
 import time
 
 from pycorr import setup_logging
+from pypower.fft_power import project_to_basis
 from .utils import BaseClass, integrate_pmesh_field
 from .base_model import SmoothedTwoPointCorrelationFunctionModel
 
@@ -96,6 +97,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
         self.logger.info('Initializing LognormalDensitySplitsModel with {} density splits'.format(nsplits))
         self.nsplits = nsplits
         self._fixed_density_bins = True
+        self.density_bins = density_bins
         if density_bins is None:
             self._fixed_density_bins = False
             self.set_params()
@@ -114,27 +116,28 @@ class LognormalDensitySplitModel(LognormalDensityModel):
 
     def set_smoothed_xi_model(self, **kwargs):
         if 'nbar' in kwargs.keys():
-            self.nbar = nbar
-            kwargs.pop('nbar')
+            self.nbar = kwargs.pop('nbar')
         else:
             self.nbar = 0
         model = SmoothedTwoPointCorrelationFunctionModel(nbar=0, **kwargs)
-        self.smoothed_xi = model.smoothed_xi
+        self.smoothed_xi = model.smoothed_xi.ravel()
         self.sep = model.sep.ravel()
         if self.nbar is not None and self.nbar:
-            # shot noise correction
+            self.logger.info('Adding shotnoise correction to the smoothed 2PCF.')
             wfield = model.smoothing_kernel_3D.c2r() / model.boxsize**3
             sep, mu, w = project_to_basis(wfield, edges=(model.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
             shotnoise = np.real(w / self.nbar)
-            xiR += shotnoise
+            self.smoothed_xi += shotnoise.ravel()
 
     def _compute_main_term(self, delta, sigma=None, delta0=None, delta01=1., xiR=None, sep=None, **kwargs):
         self.set_params(sigma=sigma, delta0=delta0)
         self.delta01 = delta01
-        self.sep = sep
-        if xiR is None and not hasattr(self, 'smoothed_xi_model'):
-            self._set_smoothed_xi_model(**kwargs)
-        xiR = self.smoothed_xi
+        if sep is not None:
+            self.sep = sep
+        if xiR is None:
+            if not hasattr(self, 'smoothed_xi'):
+                self.set_smoothed_xi_model(**kwargs)
+            xiR = self.smoothed_xi
         if math.isfinite(delta):
             a = scipy.special.erf((np.log(1 + delta/self.delta0) + self.sigma**2/2. - np.log(1 + xiR/(self.delta0*self.delta01))) / (np.sqrt(2) * self.sigma))
             b = scipy.special.erf((np.log(1 + delta/self.delta0) + self.sigma**2/2.) / (np.sqrt(2) * self.sigma))
@@ -158,7 +161,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             a1, b1 = self._compute_main_term(d1, delta0=delta0, **kwargs)
             a2, b2 = self._compute_main_term(d2, delta0=delta0, **kwargs)
             main_term = (a2 - a1) / (b2 - b1)
-            dsplits.append(delta0*(main_term - 1))
+            dsplits.append(self.delta01*(main_term - 1))
         return dsplits
         
     
