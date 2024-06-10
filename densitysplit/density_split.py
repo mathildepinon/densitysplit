@@ -119,7 +119,6 @@ class DensitySplit:
         self.cellsize = cellsize
         self.resampler = resampler
 
-
     def split_density(self, nsplits=2, bins=None, labels=None):
         if labels is None:
             #labels = ['DS{}'.format(i+1) for i in range(nsplits)]
