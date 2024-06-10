@@ -26,7 +26,7 @@ class BaseTwoPointCorrelationFunctionModel(BaseClass):
         super().__init__(**kwargs)
         if self.pk is None:
             self.logger.info('Initializing theoretical 1D power spectrum')
-            fo = Fourier(self.cosmology, engine='class')
+            fo = Fourier(self.cosmology, engine='camb')
             pk_callable = fo.pk_interpolator(non_linear=self.non_linear, extrap_kmin=1e-10, extrap_kmax=1e6).to_1d(z=self.redshift)
             pk_array = pk_callable(self.k)
             if self.damping:

@@ -211,9 +211,9 @@ def main():
     boxsize = 2000
     boxcenter = 1000
     nmesh = 1024
-    nbar = 0.003
+    nbar = 0.0034
     cosmology=fiducial.AbacusSummitBase()
-    z = 1.175
+    z = 0.8
     bias = 1.
 
     # Mocks
@@ -224,22 +224,26 @@ def main():
     f = bg.growth_rate(z)
     hz = 100*bg.efunc(z)
     los = 'x'
+
+    filename = 'lagrangian_mock_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.4f}'.format(z, bias, boxsize, nmesh, nbar)
     
-    generate_N_lagrangian_mocks(nmocks, nmesh, boxsize, boxcenter, nbar,
-                                 cosmology=cosmology, z=z, bias=bias, rsd=False, los=los, f=f,
-                                 output_dir=output_dir, name='lognormal_mock',
-                                 mpi=False, overwrite=False)
+    # generate_N_lagrangian_mocks(nmocks, nmesh, boxsize, boxcenter, nbar,
+    #                              cosmology=cosmology, z=z, bias=bias, rsd=False, los=los, f=f,
+    #                              output_dir=output_dir, name='lognormal_mock',
+    #                              mpi=False, overwrite=False)
+
+    generate_lagrangian_mock(nmesh, boxsize, boxcenter, 0, nbar, cosmology=cosmology, z=1., bias=1., rsd=False, los=None, f=None, save=True, output_dir=output_dir, name=filename, mpi=False)
 
     #batch_size = 1
     #batch_index = int(sys.argv[1])
     
     # Edges (s, mu) to compute correlation function at
-    edges = (np.linspace(0., 150., 151), np.linspace(-1, 1, 201))
+    # edges = (np.linspace(0., 150., 151), np.linspace(-1, 1, 201))
     
-    results = generate_batch_2PCF(edges, nmocks, nmesh, boxsize, boxcenter,
-                             nbar, cosmology=cosmology, z=z, bias=bias,
-                             los=los, rsd=False, use_weights=False,
-                             nthreads=100, output_dir=output_dir, name='lognormal_mock')
+    # results = generate_batch_2PCF(edges, nmocks, nmesh, boxsize, boxcenter,
+    #                          nbar, cosmology=cosmology, z=z, bias=bias,
+    #                          los=los, rsd=False, use_weights=False,
+    #                          nthreads=100, output_dir=output_dir, name='lognormal_mock')
 
     # Edges (k, mu) to compute power spectrum at
     # edges = {'step': 0.005}
@@ -250,12 +254,12 @@ def main():
     #                                         nthreads=128,
     #                                         output_dir=output_dir, name='lagrangian_mock')
 
-    output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
-    name = '{:d}_lognormal_mocks_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
+    # output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
+    # name = '{:d}_lognormal_mocks_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(nmocks, z, bias, boxsize, nmesh, nbar)
     #output_dir = '/feynman/work/dphp/mp270220/outputs/power_spectrum/'
     #np.save(output_dir+name+'_pk_ic', results_ic)
     #np.save(output_dir+name+'_pk', results)
-    np.save(output_dir+name+'_2PCF', results)
+    # np.save(output_dir+name+'_2PCF', results)
 
 
 if __name__ == "__main__":

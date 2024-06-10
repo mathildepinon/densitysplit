@@ -118,10 +118,10 @@ def main():
     nmocks = 10
 
     # For RSD
-    rsd = True
+    rsd = False
     bg = cosmology.get_background()
     # f = bg.growth_rate(z)
-    z = 1.175
+    z = 0.800
     hz = 100*bg.efunc(z)
 
     # Density smoothing parameters
@@ -146,9 +146,10 @@ def main():
     edges = (np.linspace(0., 150., 151), np.linspace(-1, 1, 201))
     los = 'x'
 
-    #name = 'AbacusSummit_2Gpc_z{:.3f}_downsampled_particles_nbar0.003'.format(z)
+    #name = 'AbacusSummit_2Gpc_z{:.3f}_downsampled_particles_nbar0.012'.format(z)
     name = 'AbacusSummit_2Gpc_z{:.3f}_ph000'.format(z)
     abacus_mock = catalog_data.Data.load('/feynman/scratch/dphp/mp270220/abacus/'+name+'.npy')
+    #abacus_mock = catalog_data.Data.load('/feynman/work/dphp/mp270220/data/'+name+'.npy')
     abacus_density = compute_delta_R([abacus_mock], cellsize, resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)[0]
 
     np.save('/feynman/work/dphp/mp270220/outputs/density/'+name+'_cellsize{:d}_resampler{}_delta_R{}'.format(cellsize, resampler, '_RSD' if rsd else ''), abacus_density)

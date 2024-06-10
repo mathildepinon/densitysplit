@@ -1,10 +1,67 @@
 import os
+import sys
 import copy
 
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import Normalize
 from pmesh import ParticleMesh
+
+
+class BaseClass(object):
+    """
+    Base class to be used throughout this package.
+    """
+    def __init__(self, *args, **kwargs):
+        if len(args):
+            if isinstance(args[0], self.__class__):
+                self.__dict__.update(args[0].__dict__)
+                return
+            try:
+                kwargs = {**args[0], **kwargs}
+            except TypeError:
+                args = dict(zip(self._defaults, args))
+                kwargs = {**args, **kwargs}
+        for name, value in self._defaults.items():
+            setattr(self, name, value)
+        self.update(**kwargs)
+
+    def update(self, **kwargs):
+        """Update input attributes."""
+        for name, value in kwargs.items():
+            if name in self._defaults:
+                setattr(self, name, value)
+            else:
+                raise ValueError('Unknown argument {}; supports {}'.format(name, list(self._defaults)))
+
+    def __copy__(self):
+        new = self.__class__.__new__(self.__class__)
+        new.__dict__.update(self.__dict__)
+        return new
+
+    def copy(self):
+        return self.__copy__()
+
+    def __setstate__(self, state, load=False):
+        self.__dict__.update(state)
+
+    @classmethod
+    def from_state(cls, state, load=False):
+        new = cls.__new__(cls)
+        new.__setstate__(state, load=load)
+        return new
+
+    def save(self, filename):
+        self.log_info('Saving {}.'.format(filename))
+        mkdir(os.path.dirname(filename))
+        np.save(filename, self.__getstate__(), allow_pickle=True)
+
+    @classmethod
+    def load(cls, filename):
+        cls.log_info('Loading {}.'.format(filename))
+        state = np.load(filename, allow_pickle=True)[()]
+        new = cls.from_state(state, load=True)
+        return new
 
 
 def get_slice_from_3D_points(points, cut_direction, cut_idx, cellsize, boxsize, offset, return_indices=False):
@@ -154,32 +211,8 @@ def integrate_pmesh_field(field):
     for x in field.slabs.x:
         x_vals.append(x[0][0][0])
 
-    # yvals = np.real(x[2][0])
-    # zvals = np.real(x[1].transpose()[0])
     xvals = np.real(np.array(x_vals))
     dV = (xvals[1]-xvals[0])**3
-    #xvals = np.real(field.slabs.optx[0][0][0])
-    # yvals = xvals
-    # zvals = xvals
-    # x_sorted_indices = xvals.argsort()
-    # y_sorted_indices = yvals.argsort()
-    # z_sorted_indices = zvals.argsort()
-    #
-    # x_sorted_field = np.real(field[x_sorted_indices, :, :])
-    # xy_sorted_field = x_sorted_field[:, y_sorted_indices, :]
-    # xyz_sorted_field = xy_sorted_field[:, :, z_sorted_indices]
-    #
-    # sorted_xvals = xvals[x_sorted_indices]
-    # sorted_yvals = yvals[y_sorted_indices]
-    # sorted_zvals = zvals[z_sorted_indices]
-    #
-    # weights_x = weights_trapz(sorted_xvals)
-    # weights_y = weights_trapz(sorted_yvals)
-    # weights_z = weights_trapz(sorted_zvals)
-
-    # intz = np.sum(xyz_sorted_field[:, :, :] * weights_z[None, None, :], axis=2)
-    # intyz = np.sum(intz[:, :] * weights_y[None, :], axis=1)
-    # intxyz = np.sum(intyz * weights_x)
     intxyz = np.sum(np.real(field)) * dV
 
     return intxyz

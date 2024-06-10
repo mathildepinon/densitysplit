@@ -1,11 +1,9 @@
-# Author: Edmond Chaussidon (CEA)
-
 ## FIGURE
 figure.titlesize   : medium     # size of the figure title
 figure.titleweight : normal     # weight of the figure title
 figure.figsize     : 6, 4      # figure size in inches
-figure.dpi         : 300        # figure dots per inch
-figure.autolayout  : True      # When True, automatically adjust subplot # not used because of mollweide plot ...
+figure.dpi         : 100        # figure dots per inch
+figure.autolayout  : True     # When True, automatically adjust subplot # not used because of mollweide plot ...
 figure.frameon     : True
 
 figure.subplot.left    : 0.08  # the left side of the subplots of the figure
@@ -33,13 +31,13 @@ axes.grid      : True
 grid.color     : grey
 grid.linestyle : -
 grid.linewidth : 0.7
-grid.alpha     : 0.2
+grid.alpha     : 0.1
 
 ## LEGEND
-legend.fancybox  : True
+legend.fancybox  : False
 legend.facecolor : white
-legend.framealpha : 0.5
-legend.edgecolor : grey
+legend.framealpha : 0.
+legend.edgecolor : None
 legend.fontsize : 12
 legend.title_fontsize : 12
 
@@ -62,16 +60,16 @@ font.family         : serif
 
 ## TEXT
 text.color          : k
-text.usetex         : False
+text.usetex         : True
 #text.latex.preamble : \newcommand{\mathdefault}[1][]{} #With python3.9 it is now useless.
-mathtext.cal : cursive
-mathtext.rm  : serif
-mathtext.tt  : monospace
-mathtext.it  : serif:italic
-mathtext.bf  : serif:bold
-mathtext.sf  : sans\-serif
-mathtext.fontset : dejavuserif
-mathtext.default : it
+#mathtext.cal : cursive
+#mathtext.rm  : serif
+#mathtext.tt  : monospace
+#mathtext.it  : serif:italic
+#mathtext.bf  : serif:bold
+#mathtext.sf  : sans\-serif
+#mathtext.fontset : dejavuserif
+#mathtext.default : it
 
 ## SAVEFIG
 savefig.transparent : False

@@ -100,6 +100,8 @@ class DensitySplit:
                            cellsize=cellsize)
 
         painted_mesh = mesh.to_mesh(field='data')
+        #painted_mesh = painted_mesh.r2c().apply(TopHat(r=20))
+        #painted_mesh = painted_mesh.c2r()
         nmesh = mesh.nmesh[0]
 
         # Compute density contrast
@@ -118,6 +120,7 @@ class DensitySplit:
         self.density_mesh = density_mesh
         self.cellsize = cellsize
         self.resampler = resampler
+
 
     def split_density(self, nsplits=2, bins=None, labels=None):
         if labels is None:
@@ -320,3 +323,27 @@ class DensitySplit:
         new = cls.__new__(cls)
         new.__setstate__(state)
         return new
+
+
+class TopHat(object):
+    '''Top-hat filter in Fourier space
+    adapted from https://github.com/bccp/nbodykit/
+
+    Parameters
+    ----------
+    r : float
+        the radius of the top-hat filter
+    '''
+    def __init__(self, r):
+        self.r = r
+
+    def __call__(self, k, v):
+        r = self.r
+        k = sum(ki ** 2 for ki in k) ** 0.5
+        kr = k * r
+        with np.errstate(divide='ignore', invalid='ignore'):
+            w = 3 * (np.sin(kr) / kr ** 3 - np.cos(kr) / kr ** 2)
+        w[k == 0] = 1.0
+        return w * v
+
+
