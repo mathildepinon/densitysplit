@@ -28,8 +28,9 @@ class LognormalDensityModel(BaseClass):
             self.sigma = sigma
         if delta0 is not None:
             self.delta0 = delta0
-        pdf_model = np.zeros_like(delta)
-        pdf_model[delta > -self.delta0] = scipy.stats.lognorm.pdf(delta[delta > -self.delta0], self.sigma, -self.delta0, self.delta0 * np.exp(-self.sigma**2 / 2))
+        #pdf_model = np.zeros_like(delta)
+        #pdf_model[delta > -self.delta0] = scipy.stats.lognorm.pdf(delta[delta > -self.delta0], self.sigma, -self.delta0, self.delta0 * np.exp(-self.sigma**2 / 2))
+        pdf_model = scipy.stats.lognorm.pdf(delta, self.sigma, -self.delta0, self.delta0 * np.exp(-self.sigma**2 / 2))
         return pdf_model
 
     def get_params_from_moments(self, sample=None, m2=None, m3=None, delta0_init=1.):
@@ -74,13 +75,95 @@ class LognormalDensityModel(BaseClass):
         """Fit parameters of the lognormal distribution (sigma, delta0) to match the input pdf."""
         self.logger.info('Fitting sigma, delta0 to match input PDF.')
         def to_fit(delta, *params):
-            ydata = self.density(delta, params[0], params[1])
-            return ydata
+            y = self.density(delta, params[0], params[1])
+            return y
         fit = scipy.optimize.curve_fit(to_fit, delta, density_pdf, p0=params_init, sigma=sigma)
         bestfit_params = fit[0]
         self.sigma = bestfit_params[0]
         self.delta0 = bestfit_params[1]
         self.logger.info('Seting sigma to {:.3f}, delta0 to {:.3f}.'.format(self.sigma, self.delta0))        
+        return bestfit_params
+
+
+class BiasedLognormalDensityModel(LognormalDensityModel):
+    """
+    Class implementing shifted lognormal model with bias.
+    """
+    _defaults = dict(sigma=None, delta0=None)
+
+    def __init__(self, *args, sigma=None, delta0=None, **kwargs):
+        if len(args) and type(args[0]) is LognormalDensityModel:
+            self.__dict__ = args[0].__dict__.copy()
+        else:
+            super().__init__(**kwargs)
+        self.logger = logging.getLogger('BiasedLognormalDensityModel')
+        self.logger.info('Initializing BiasedLognormalDensityModel')
+
+    def bias_function(self, delta, model='quadratic', sigma=None, delta0=None, b1=1., b2=0., b3=0., return_deriv=True):
+        if model=='linear':
+            biased_delta = b1 * delta
+            deriv = b1
+        delta2 = delta0**2*(np.exp(sigma**2)-1)
+        if model=='quadratic':
+            biased_delta = b1 * delta + b2 * (delta**2 - delta2)
+            deriv = b1 + 2 * b2 * delta
+        if model=='cubic':
+            delta3 = delta2**3 / delta0**3 + 3 * delta2**2 / delta0
+            biased_delta = b1 * delta + b2 * (delta**2 - sigma**2) + b3 * (delta**3 - delta3)
+            deriv = b1 + 2 * b2 * delta + 3 * b3 * delta**2
+        if model=='gaussian':
+            b2 = b2 - b1**2
+            mub = - b1 / b2
+            Nb = np.exp(-b1**2/(2*b2)) / np.sqrt(b2*delta2 +1)
+            sigmab = np.sqrt(-1/b2 - delta2)
+            biased_delta = Nb * np.exp(-(delta - mub)**2 / (2*sigmab**2))
+            print(biased_delta)
+            deriv = Nb * (delta - mub) / sigmab**2 * np.exp(-(delta - mub)**2 / (2*sigmab**2))
+        if return_deriv:
+            return biased_delta, deriv
+        else:
+            return biased_deltas
+        
+    def density(self, delta, model='quadratic', sigma=None, delta0=None, b1=1., b2=0., b3=0.):
+        if model=='test':
+            delta2 = delta0**2*(np.exp(sigma**2)-1)
+            delta3 = 3/delta0**2*delta2 + 1/delta0**3*delta2**(3./2)
+            biaseddelta = b1*delta + b2/2.*(delta**2 - delta2) + b3*(delta**3 - delta3)
+            pdf_model = scipy.stats.lognorm.pdf(biaseddelta, sigma, -delta0, delta0 * np.exp(-sigma**2 / 2))
+            norm = b1 + 2*b2*delta + 2*b3*delta**2
+            return pdf_model/np.abs(norm)
+        else:
+            pdf_model = scipy.stats.lognorm.pdf(delta, sigma, -delta0, delta0 * np.exp(-sigma**2 / 2))
+            biaseddelta, deriv = self.bias_function(delta, model, sigma, delta0, b1, b2, b3, return_deriv=True)
+            pdf_model /= np.abs(deriv)
+            biased_pdf_model = np.interp(delta, biaseddelta, pdf_model, left=0, right=0)
+            return biased_pdf_model
+            
+    def fit_params_from_pdf(self, delta=None, density_pdf=None, model='quadratic', params_init=None, sigma=None):
+        """Fit parameters of the biased lognormal distribution to match the input pdf."""
+        if model=='linear':
+            params_init = np.array([1.])
+        if model=='quadratic':
+            params_init = np.array([1., 0.])
+        if model=='cubic':
+            params_init = np.array([1., 0., 0.])
+        if model=='gaussian':
+            params_init = np.array([0.37, 0.955, 1.52, 0.007])
+        if model=='test':
+            params_init = np.array([1., 1., 1., 0., 0.])
+        self.logger.info('Fitting {} params'.format(len(params_init)))
+        
+        def to_fit(delta, *params):
+            if model=='test' or model=='gaussian':
+                y = self.density(delta, model, *params)
+            else:
+                y = self.density(delta, model, self.sigma, self.delta0, *params)
+            return y
+
+        fit = scipy.optimize.curve_fit(to_fit, delta, density_pdf, p0=params_init, sigma=sigma)
+        bestfit_params = fit[0]
+        self.bias_params = bestfit_params
+        self.logger.info('Best fit parameters: {}'.format(bestfit_params))      
         return bestfit_params
 
 
