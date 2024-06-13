@@ -50,7 +50,7 @@ class LognormalDensityModel(BaseClass):
         self.logger.info('Seting sigma to {:.3f}, delta0 to {:.3f}.'.format(self.sigma, self.delta0))        
         return sigma, delta0
 
-    def get_sigma_from_theory(self, delta0=None, **kwargs):
+    def get_sigma_from_theory(self, delta0=None, rsd=False, **kwargs):
         """Compute sigma from the theoretical variance of the smoothed density field."""
         if delta0 is not None:
             self.delta0 = delta0
@@ -65,6 +65,16 @@ class LognormalDensityModel(BaseClass):
             w2 = integrate_pmesh_field(real_space_kernel**2)
             shotnoise = w2 / model.nbar
             sigmaRR = np.sqrt(sigmaRR**2 + shotnoise)
+        if rsd:
+            self.logger.info('Computing variance of the smoothed density field in redshift space.')        
+            bg = cosmology.get_background(engine='camb')
+            f = bg.growth_rate(z)
+            bias = 1.
+            beta = f / bias
+            if 'non_linear' in kwargs.keys():
+                kwargs.pop('non_linear')
+            model = SmoothedTwoPointCorrelationFunctionModel(non_linear=False, **kwargs)
+            sigmaRR = np.sqrt((1 + 2 * beta /3 + beta**2 /5.)*model.sigma_RR**2 + shotnoise)
         self.logger.info('Square root of the theoretical variance of the smoothed density field computed: {:.3f}.'.format(float(sigmaRR)))        
         self.theory_double_smoothed_sigma = sigmaRR
         self.sigma = float(np.sqrt(np.log(1 + sigmaRR**2/self.delta0**2)))
@@ -233,7 +243,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
                 b = np.full_like(xiR, -1)
         return a, b
     
-    def compute_dsplits(self, delta0=None, **kwargs):
+    def compute_dsplits(self, delta0=None, rsd=False, ells=[0, 2, 4], mu=None, **kwargs):
         self.logger.info('Computing lognormal density split model.')
         if delta0 is None:
             delta0 = self.delta0
@@ -245,6 +255,12 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             a2, b2 = self._compute_main_term(d2, delta0=delta0, **kwargs)
             main_term = (a2 - a1) / (b2 - b1)
             dsplits.append(self.delta01*(main_term - 1))
+        if rsd:
+            dsplits_rsd = list()
+            for ds in range(len(dsplits)):
+                res_ds = [(2*ell + 1)/2. * np.trapz(dsplits[ds] * scipy.special.legendre(ell)(mu), x=mu, axis=1) for ell in ells]
+                dsplits_rsd.append(res_ds)
+            return dsplits_rsd
         return dsplits
         
     
