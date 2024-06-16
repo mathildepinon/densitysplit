@@ -8,6 +8,14 @@ from matplotlib.colors import Normalize
 from pmesh import ParticleMesh
 
 
+def mkdir(dirname):
+    """Try to create ``dirname`` and catch :class:`OSError`."""
+    try:
+        os.makedirs(dirname)  # MPI...
+    except OSError:
+        return
+
+
 class BaseClass(object):
     """
     Base class to be used throughout this package.
@@ -52,13 +60,13 @@ class BaseClass(object):
         return new
 
     def save(self, filename):
-        self.log_info('Saving {}.'.format(filename))
+        print('Saving {}.'.format(filename))
         mkdir(os.path.dirname(filename))
         np.save(filename, self.__getstate__(), allow_pickle=True)
 
     @classmethod
     def load(cls, filename):
-        cls.log_info('Loading {}.'.format(filename))
+        print('Loading {}.'.format(filename))
         state = np.load(filename, allow_pickle=True)[()]
         new = cls.from_state(state, load=True)
         return new

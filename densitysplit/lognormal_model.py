@@ -214,13 +214,17 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             self.nbar = 0
         model = SmoothedTwoPointCorrelationFunctionModel(nbar=0, **kwargs)
         self.smoothed_xi = model.smoothed_xi.ravel()
+        self.double_smoothed_xi = model.double_smoothed_xi.ravel()
         self.sep = model.sep.ravel()
         if self.nbar is not None and self.nbar:
             self.logger.info('Adding shotnoise correction to the smoothed 2PCF.')
             wfield = model.smoothing_kernel_3D.c2r() / model.boxsize**3
             sep, mu, w = project_to_basis(wfield, edges=(model.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+            sep, mu, w2 = project_to_basis(wfield**2, edges=(model.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
             shotnoise = np.real(w / self.nbar)
             self.smoothed_xi += shotnoise.ravel()
+            shotnoise = np.real((1 + model.sigma**2) * w2 / self.nbar)
+            self.double_smoothed_xi  += shotnoise.ravel()
 
     def _compute_main_term(self, delta, sigma=None, delta0=None, delta01=1., xiR=None, sep=None, **kwargs):
         self.set_params(sigma=sigma, delta0=delta0)

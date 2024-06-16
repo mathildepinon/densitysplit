@@ -1,33 +1,27 @@
 import os
 import copy
-
+import logging 
 import numpy as np
 import pandas
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 
 from pypower import CatalogMesh
+from pycorr import TwoPointCorrelationFunction, setup_logging
 
 from . import catalog_data
 from . import utils
+from .utils import BaseClass
 
 
 
 def sample_splits(density_mesh, resampler, split_bins, size, boxsize, offset, cellsize, seed=42):
     rng = np.random.RandomState(seed=seed)
     positions = [o + rng.uniform(0., 1., size)*b for o, b in zip((offset,)*3, (boxsize,)*3)]
-#    nmesh = round(boxsize/cellsize)
-#    positions_grid_indices = ((np.array(positions) - offset + cellsize/2.) // cellsize).astype(int) % nmesh
     shifted_positions = np.array(positions) - offset
     densities = density_mesh.readout(shifted_positions.T, resampler=resampler)
 
     split_samples = list()
-
-#    for i in np.unique(split_mesh):
-#        split = (split_mesh == i)
-#        sample_in_split = split[tuple(positions_grid_indices.tolist())]
-
-#        split_samples.append(np.array(positions).T[sample_in_split].T)
 
     nsplits = len(split_bins)-1
 
@@ -46,13 +40,14 @@ def sample_splits(density_mesh, resampler, split_bins, size, boxsize, offset, ce
     return split_samples
 
 
-class DensitySplit:
+class DensitySplit(BaseClass):
     """
     Class DensitySplit.
     """
-
+    
     def __init__(self, data):
-
+        self.logger = logging.getLogger('DensitySplit')
+        self.logger.info('Initializing DensitySplit')
         self.data = data
         self.boxsize = data.boxsize
         self.boxcenter = data.boxcenter
@@ -73,6 +68,8 @@ class DensitySplit:
 
 
     def compute_density(self, cellsize, resampler, use_rsd=False, los=None, hz=None, use_weights=False):
+        """Compute density contrast on a mesh."""
+        self.logger.info('Compute density on a mesh with cellsize {}.'.format(cellsize))
 
         data = self.data
         if use_rsd:
@@ -98,13 +95,15 @@ class DensitySplit:
                            boxsize=self.boxsize, boxcenter=self.boxcenter,
                            resampler=resampler,
                            cellsize=cellsize)
-
+        
+        self.logger.info('Paint data to mesh.')
         painted_mesh = mesh.to_mesh(field='data')
         #painted_mesh = painted_mesh.r2c().apply(TopHat(r=20))
         #painted_mesh = painted_mesh.c2r()
         nmesh = mesh.nmesh[0]
 
         # Compute density contrast
+        self.logger.info('Compute density contrast.')
         density_mesh = painted_mesh/(norm/(nmesh**3)) - 1
 
         # Get positions of catalog particles in the catalog mesh
@@ -115,11 +114,28 @@ class DensitySplit:
         shifted_positions = positions - self.offset
         # resampler name conversions
         resampler_conversions = {'ngp': 'nnb', 'cic': 'cic', 'tsc': 'tsc', 'pcs': 'pcs'}
+        self.logger.info('Read density contrast at data positions.')
         self.data_densities = density_mesh.readout(shifted_positions.T, resampler=resampler_conversions[resampler])
 
         self.density_mesh = density_mesh
         self.cellsize = cellsize
         self.resampler = resampler
+
+    
+    def readout_density(self, positions='randoms', rsd=False, resampler='tsc', seed=0):
+        if positions=='data':
+            pos = self.positions - self.offset
+            densities = self.density_mesh.readout(pos.T, resampler=resampler)
+            return densities
+        if positions=='data_rsd':
+            pos = self.positions_rsd - self.offset
+            densities = self.density_mesh.readout(pos.T, resampler=resampler)
+            return densities
+        if positions=='randoms':
+            rng = np.random.RandomState(seed=seed)
+            pos = np.array([rng.uniform(0., 1., self.data.size)*b for b in (self.data.boxsize,)*3])
+            densities = self.density_mesh.readout(pos.T, resampler=resampler)
+            return densities
 
 
     def split_density(self, nsplits=2, bins=None, labels=None):
@@ -180,6 +196,86 @@ class DensitySplit:
         return split_samples
 
 
+    def compute_smoothed_corr(self, edges, seed=0, use_rsd=False, los=None, hz=None, use_weights=False, nthreads=128):
+        data = self.data
+    
+        if use_rsd:
+            if data.positions_rsd is None:
+                data.set_rsd(hz=hz, los=los)
+            positions2 = data.positions_rsd
+        else:
+            positions2 = data.positions
+    
+        if use_weights and (data.weights is not None):
+            weights2 = data.weights
+        else:
+            weights2 = None
+    
+        ## Generate random particles and readout density at each particle
+        rng = np.random.RandomState(seed=seed)
+        positions1 = [o + rng.uniform(0., 1., self.data.size)*b for o, b in zip((self.offset,)*3, (self.boxsize,)*3)]
+        shifted_positions1 = np.array(positions1) - self.offset
+        densities = self.density_mesh.readout(shifted_positions1.T, resampler=self.resampler)
+        weights1 = 1 + densities
+    
+        smoothed_corr = TwoPointCorrelationFunction('smu', edges,
+                                            data_positions1=positions1, data_positions2=positions2,
+                                            data_weights1=weights1, data_weights2=weights2,
+                                            boxsize=self.boxsize,
+                                            engine='corrfunc', nthreads=nthreads,
+                                            los=los)
+
+        self.smoothed_corr = smoothed_corr
+        
+        return smoothed_corr
+
+
+    def compute_ds_data_corr(self, edges, use_rsd=False, los=None, hz=None, use_weights=False, seed=0, output_dir='', randoms_size=1, smooth_data=False, nthreads=128):
+        """Compute cross-correlation of random points in density splits with data."""
+        data = self.data
+    
+        if use_rsd:
+            if data.positions_rsd is None:
+                data.set_rsd(hz=hz, los=los)
+            positions = data.positions_rsd
+            split_positions = self.split_positions_rsd
+        else:
+            positions = data.positions
+            split_positions = self.split_positions
+    
+        if use_weights and (data.weights is not None):
+            weights = data.weights
+            split_weights = [weights[self.split_indices[split]] for split in range(self.nsplits)]
+        else:
+            weights = None
+            split_weights = [None for split in range(self.nsplits)]
+
+        if smooth_data:
+            self.logger.info('Using smoothed density contrast for data.')
+            densities = self.readout_density(positions='randoms', resampler=self.resampler, seed=seed)
+            weights = 1 + densities
+        
+        split_samples = self.sample_splits(size=randoms_size*data.size, seed=seed, update=True)
+        cellsize = self.cellsize
+    
+        densitysplits = list()
+    
+        self.logger.info('Compute density splits.')
+        for i in range(self.nsplits):
+            self.logger.info('Density split {}'.format(i))
+            dsplit = TwoPointCorrelationFunction('smu', edges,
+                                                    data_positions1=split_samples[i], data_positions2=positions,
+                                                    data_weights1=None, data_weights2=weights,
+                                                    boxsize=self.boxsize,
+                                                    engine='corrfunc', nthreads=nthreads,
+                                                    los = los)
+            densitysplits.append(dsplit)
+    
+        self.ds_data_corr = densitysplits
+        
+        return densitysplits
+
+    
     def show_halos_map(self, fig, ax, cellsize, cut_direction, cut_idx, use_rsd=False, use_weights=False, split=False,
                        color='white', colors=None, density=True, cmap=mpl.cm.viridis):
 
@@ -294,12 +390,13 @@ class DensitySplit:
         for name in ['boxsize', 'boxcenter', 'offset',
                      'use_rsd', 'use_weights', 'cellsize', 'resampler', 'density_mesh', 'data_densities',
                      'nsplits', 'split_bins', 'split_labels', 'split_mesh', 'split_indices', 'split_densities', 'split_positions', 'split_positions_rsd',
-                     'split_samples']:
+                     'split_samples', 'smoothed_corr', 'ds_data_corr']:
             if hasattr(self, name):
                 state[name] = getattr(self, name)
         if hasattr(self, 'data'):
             state['data'] = self.data.__getstate__()
-        state['density_mesh'] = {'array': self.density_mesh.value, 'boxsize': self.density_mesh.pm.BoxSize}
+        if hasattr(self, 'density_mesh'):
+            state['density_mesh'] = {'array': self.density_mesh.value, 'boxsize': self.density_mesh.pm.BoxSize}
         return state
 
 
@@ -311,10 +408,6 @@ class DensitySplit:
         mesh = pm.create(type='real')
         mesh.unravel(self.density_mesh['array'].ravel())
         self.density_mesh = mesh
-
-
-    def save(self, filename):
-        np.save(filename, self.__getstate__(), allow_pickle=True)
 
 
     @classmethod
