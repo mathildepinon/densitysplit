@@ -71,8 +71,9 @@ if __name__ == '__main__':
         mock_density.compute_density(cellsize=args.cellsize, resampler=args.resampler, cellsize2=args.cellsize2, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights)
 
         # compute density splits
-        delta_R = mock_density.readout_density(positions='randoms', rsd=args.rsd, resampler=args.resampler, seed=args.imock)
-        bins = compute_lognormal_split_bins(delta_R, args.nsplits)
+        #delta_R = mock_density.readout_density(positions='randoms', rsd=args.rsd, resampler=args.resampler, seed=args.imock)
+        #bins = compute_lognormal_split_bins(delta_R, args.nsplits)
+        bins = np.array([[-1., -0.19435888, 0.09070214, np.inf]])
         print('Compute density splits in bins: ', bins)
         mock_density.split_density(args.nsplits, bins=bins)
         mock_density.compute_smoothed_corr(edges, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights, seed=args.imock, nthreads=32)
