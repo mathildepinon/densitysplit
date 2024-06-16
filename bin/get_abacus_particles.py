@@ -12,7 +12,8 @@ from densitysplit import catalog_data
 cosmology = fiducial.AbacusSummitBase()
 bg = cosmology.get_background()
 z = 0.800
-downsampling = 0.0027801453496639457
+#downsampling = 0.0027801453496639457
+downsampling = 0.0001
 
 output_dir = '/feynman/scratch/dphp/mp270220/abacus/'
 path_to_sim = '/feynman/scratch/dphp/ar264273/Abacus/AbacusSummit_base_c000_ph000/halos/z{:.3f}/'.format(z)
