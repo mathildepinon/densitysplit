@@ -67,7 +67,7 @@ class DensitySplit(BaseClass):
             self.split_samples = [self.split_samples[i] + offset for i in range(len(self.split_samples))]
 
 
-    def compute_density(self, cellsize, resampler, use_rsd=False, los=None, hz=None, use_weights=False):
+    def compute_density(self, cellsize, resampler, cellsize2=None, use_rsd=False, los=None, hz=None, use_weights=False):
         """Compute density contrast on a mesh."""
         self.logger.info('Compute density on a mesh with cellsize {}.'.format(cellsize))
 
@@ -89,7 +89,7 @@ class DensitySplit(BaseClass):
             weights = None
             self.use_weights = False
             norm = data.size
-            
+
         mesh = CatalogMesh(data_positions=positions, data_weights=weights,
                            interlacing=0,
                            boxsize=self.boxsize, boxcenter=self.boxcenter,
@@ -105,12 +105,20 @@ class DensitySplit(BaseClass):
         # Compute density contrast
         self.logger.info('Compute density contrast.')
         density_mesh = painted_mesh/(norm/(nmesh**3)) - 1
-
-        # Get positions of catalog particles in the catalog mesh
-        #positions_grid_indices = ((np.array(positions) - self.offset + cellsize/2.) // cellsize).astype(int) % nmesh
+       
+        if cellsize2 is not None and cellsize2 != cellsize:
+            self.logger.info('Compute density with smoothing scale {}.'.format(cellsize2))
+            mesh2 = CatalogMesh(data_positions=positions, data_weights=weights,
+                               interlacing=0,
+                               boxsize=self.boxsize, boxcenter=self.boxcenter,
+                               resampler=resampler,
+                               cellsize=cellsize2)      
+            painted_mesh2 = mesh2.to_mesh(field='data')
+            nmesh2 = mesh2.nmesh[0]
+            density_mesh2 = painted_mesh2/(norm/(nmesh2**3)) - 1
+            self.density_mesh2 = density_mesh2
 
         # Get densities at each point
-        #self.data_densities = density_mesh[tuple(positions_grid_indices.tolist())]
         shifted_positions = positions - self.offset
         # resampler name conversions
         resampler_conversions = {'ngp': 'nnb', 'cic': 'cic', 'tsc': 'tsc', 'pcs': 'pcs'}
@@ -120,21 +128,26 @@ class DensitySplit(BaseClass):
         self.density_mesh = density_mesh
         self.cellsize = cellsize
         self.resampler = resampler
-
+        self.cellsize2 = cellsize2
+        
     
-    def readout_density(self, positions='randoms', rsd=False, resampler='tsc', seed=0):
+    def readout_density(self, positions='randoms', rsd=False, resampler='tsc', seed=0, mesh=1):
+        if mesh==1:
+            density_mesh = self.density_mesh
+        elif mesh==2:
+            density_mesh = self.density_mesh2
         if positions=='data':
             pos = self.positions - self.offset
-            densities = self.density_mesh.readout(pos.T, resampler=resampler)
+            densities = density_mesh.readout(pos.T, resampler=resampler)
             return densities
         if positions=='data_rsd':
             pos = self.positions_rsd - self.offset
-            densities = self.density_mesh.readout(pos.T, resampler=resampler)
+            densities = density_mesh.readout(pos.T, resampler=resampler)
             return densities
         if positions=='randoms':
             rng = np.random.RandomState(seed=seed)
             pos = np.array([rng.uniform(0., 1., self.data.size)*b for b in (self.data.boxsize,)*3])
-            densities = self.density_mesh.readout(pos.T, resampler=resampler)
+            densities = density_mesh.readout(pos.T, resampler=resampler)
             return densities
 
 
@@ -198,25 +211,35 @@ class DensitySplit(BaseClass):
 
     def compute_smoothed_corr(self, edges, seed=0, use_rsd=False, los=None, hz=None, use_weights=False, nthreads=128):
         data = self.data
-    
-        if use_rsd:
-            if data.positions_rsd is None:
-                data.set_rsd(hz=hz, los=los)
-            positions2 = data.positions_rsd
-        else:
-            positions2 = data.positions
-    
-        if use_weights and (data.weights is not None):
-            weights2 = data.weights
-        else:
-            weights2 = None
-    
+
         ## Generate random particles and readout density at each particle
         rng = np.random.RandomState(seed=seed)
         positions1 = [o + rng.uniform(0., 1., self.data.size)*b for o, b in zip((self.offset,)*3, (self.boxsize,)*3)]
         shifted_positions1 = np.array(positions1) - self.offset
         densities = self.density_mesh.readout(shifted_positions1.T, resampler=self.resampler)
         weights1 = 1 + densities
+    
+        if self.cellsize2 is None:
+            if use_rsd:
+                if data.positions_rsd is None:
+                    data.set_rsd(hz=hz, los=los)
+                positions2 = data.positions_rsd
+            else:
+                positions2 = data.positions
+        
+            if use_weights and (data.weights is not None):
+                weights2 = data.weights
+            else:
+                weights2 = None
+        else:
+            self.logger.info('Use smoothed density contrast for second term (cellsize2 = {}).'.format(self.cellsize2))
+            if self.cellsize2 == self.cellsize:
+                positions2 = None
+                weights2 = None
+            else:
+                positions2 = positions1
+                densities2 = self.density_mesh2.readout(shifted_positions1.T, resampler=self.resampler)
+                weights2 = 1 + densities2
     
         smoothed_corr = TwoPointCorrelationFunction('smu', edges,
                                             data_positions1=positions1, data_positions2=positions2,
@@ -234,27 +257,30 @@ class DensitySplit(BaseClass):
         """Compute cross-correlation of random points in density splits with data."""
         data = self.data
     
-        if use_rsd:
-            if data.positions_rsd is None:
-                data.set_rsd(hz=hz, los=los)
-            positions = data.positions_rsd
-            split_positions = self.split_positions_rsd
-        else:
-            positions = data.positions
-            split_positions = self.split_positions
-    
-        if use_weights and (data.weights is not None):
-            weights = data.weights
-            split_weights = [weights[self.split_indices[split]] for split in range(self.nsplits)]
-        else:
-            weights = None
-            split_weights = [None for split in range(self.nsplits)]
-
-        if smooth_data:
-            self.logger.info('Using smoothed density contrast for data.')
-            densities = self.readout_density(positions='randoms', resampler=self.resampler, seed=seed)
+        if self.cellsize2 is not None:
+            self.logger.info('Use smoothed density contrast for data (cellsize2 = {}).'.format(self.cellsize2))
+            rng = np.random.RandomState(seed=seed)
+            positions = [o + rng.uniform(0., 1., self.data.size)*b for o, b in zip((self.offset,)*3, (self.boxsize,)*3)]
+            shifted_positions = np.array(positions) - self.offset
+            if self.cellsize2 == self.cellsize: 
+                densities = self.density_mesh.readout(shifted_positions.T, resampler=self.resampler)
+            else:
+                densities = self.density_mesh2.readout(shifted_positions.T, resampler=self.resampler)
             weights = 1 + densities
+            
+        else:
+            if use_rsd:
+                if data.positions_rsd is None:
+                    data.set_rsd(hz=hz, los=los)
+                positions = data.positions_rsd
+            else:
+                positions = data.positions
         
+            if use_weights and (data.weights is not None):
+                weights = data.weights
+            else:
+                weights = None
+      
         split_samples = self.sample_splits(size=randoms_size*data.size, seed=seed, update=True)
         cellsize = self.cellsize
     
@@ -388,7 +414,7 @@ class DensitySplit(BaseClass):
     def __getstate__(self):
         state = {}
         for name in ['boxsize', 'boxcenter', 'offset',
-                     'use_rsd', 'use_weights', 'cellsize', 'resampler', 'density_mesh', 'data_densities',
+                     'use_rsd', 'use_weights', 'cellsize', 'cellsize2', 'resampler', 'density_mesh', 'data_densities',
                      'nsplits', 'split_bins', 'split_labels', 'split_mesh', 'split_indices', 'split_densities', 'split_positions', 'split_positions_rsd',
                      'split_samples', 'smoothed_corr', 'ds_data_corr']:
             if hasattr(self, name):
