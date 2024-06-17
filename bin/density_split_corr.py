@@ -32,6 +32,7 @@ if __name__ == '__main__':
         
     parser = argparse.ArgumentParser(description='density_split_corr')
     #parser.add_argument('--todo', type=str, nargs='*', required=False, default='ds_data_corr', choices=['ds_data_corr'])
+    parser.add_argument('--env', type=str, required=False, default='feynman', choices=['feynman', 'nersc'])
     parser.add_argument('--imock', type=int, required=False, default=0)
     parser.add_argument('--redshift', type=float, required=False, default=None)
     parser.add_argument('--simulation', type=str, required=False, default='abacus', choices=['abacus', 'gaussian', 'lognormal'])
@@ -55,7 +56,10 @@ if __name__ == '__main__':
 
     if args.simulation == 'abacus':
         cosmology=fiducial.AbacusSummitBase()
-        datadir = '/feynman/scratch/dphp/mp270220/abacus/'
+        if args.env == 'feynman':
+            datadir = '/feynman/scratch/dphp/mp270220/abacus/'
+        elif args.env == 'nersc':
+            datadir = '/pscratch/sd/m/mpinon/abacus/'
         if args.tracer == 'halos':
             simname = 'AbacusSummit_2Gpc_z{:.3f}_ph0{:02d}'.format(z, args.imock)
         elif args.tracer == 'particles':
@@ -80,7 +84,10 @@ if __name__ == '__main__':
         mock_density.compute_ds_data_corr(edges, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights, seed=args.imock, randoms_size=args.randoms_size, nthreads=32)
 
         # save result
-        outputdir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
+        if args.env == 'feynman':
+            outputdir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
+        elif args.env == 'nersc':
+            outputdir = '/pscratch/sd/m/mpinon/abacus/densitysplit'
         outputname = simname + '_cellsize{:d}{}_resampler{}_{:d}splits_randoms_size{:d}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, args.nsplits, args.randoms_size) + '_RH_CCF{}'.format('_RSD' if args.rsd else '')
         mock_density.save(os.path.join(outputdir, outputname))
         
