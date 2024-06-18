@@ -138,7 +138,7 @@ def main():
     nmocks = 10
 
     # For RSD
-    rsd = False
+    rsd = True
     bg = cosmology.get_background()
     # f = bg.growth_rate(z)
     z = 0.8
@@ -172,23 +172,23 @@ def main():
     #abacus_mock = catalog_data.Data.load('/feynman/work/dphp/mp270220/data/'+name+'.npy')
     #abacus_density = compute_delta_R([abacus_mock], cellsize, resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)[0]
 
-    #s = np.array([20, 30, 50, 100])
-    #r1 = 10
-    #r2 = 3
-    #res = list()
-    #for sep in s:
-    #    joint_deltaR = compute_jointPDF_delta_R1_R2(abacus_mock, cellsize1=r1, cellsize2=r2, resampler=resampler, s=sep)
-    #    res.append(joint_deltaR)
-    #output_dir = '/feynman/work/dphp/mp270220/outputs/density/'
-    #np.save(output_dir+name+'_cellsize1{:d}_cellsize2{:d}_resampler{}'.format(r1, r2, resampler)+'_joint_delta_R{}'.format('_RSD' if rsd else ''), res)
+    s = np.array([20, 30, 50, 100])
+    r1 = 10
+    r2 = 10
+    res = list()
+    for sep in s:
+        joint_deltaR = compute_jointPDF_delta_R1_R2(abacus_mock, cellsize1=r1, cellsize2=r2, resampler=resampler, s=sep, use_rsd=rsd, los=los, hz=hz)
+        res.append(joint_deltaR)
+    output_dir = '/feynman/work/dphp/mp270220/outputs/density/'
+    np.save(output_dir+name+'_cellsize1{:d}_cellsize2{:d}_resampler{}'.format(r1, r2, resampler)+'_joint_delta_R{}'.format('_RSD' if rsd else ''), res)
 
     #np.save('/feynman/work/dphp/mp270220/outputs/density/'+name+'_cellsize{:d}_resampler{}_delta_R{}'.format(cellsize, resampler, '_RSD' if rsd else ''), abacus_density)
                     
-    mock_density = density_split.DensitySplit(abacus_mock)
-    mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)
-    print('Computing correlation function...')
+    #mock_density = density_split.DensitySplit(abacus_mock)
+    #mock_density.compute_density(cellsize=cellsize, resampler=resampler, use_rsd=rsd, los=los, hz=hz, use_weights=False)
+    #print('Computing correlation function...')
     #mock_xi_R = compute_xi_R(mock_density, edges, seed=0, use_rsd=rsd, los=los, hz=hz, use_weights=False, nthreads=64)
-    mock_xi_RR = compute_xi_RR(mock_density, edges, seed=0, use_rsd=rsd, los=los, hz=hz, use_weights=False, nthreads=64)
+    #mock_xi_RR = compute_xi_RR(mock_density, edges, seed=0, use_rsd=rsd, los=los, hz=hz, use_weights=False, nthreads=64)
 
     #batch_index = int(sys.argv[1])
     #batch_size = 1
@@ -202,9 +202,9 @@ def main():
     
     # name = '{:d}gaussianMocks_batch{:d}_pkdamped_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_size, batch_index, z, bias, boxsize, nmesh, nbar)
     # name = 'lognormalMock{:d}_z{:.3f}_bias{:.1f}_boxsize{:d}_nmesh{:d}_nbar{:.3f}'.format(batch_index, z, bias, boxsize, nmesh, nbar)
-    output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
+    #output_dir = '/feynman/work/dphp/mp270220/outputs/correlation_functions/'
     #np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_R', results)
-    np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_RR{}'.format('_RSD' if rsd else ''), mock_xi_RR)
+    #np.save(output_dir+name+'_cellsize{:d}_resampler{}'.format(cellsize, resampler)+'_xi_RR{}'.format('_RSD' if rsd else ''), mock_xi_RR)
 
 
 if __name__ == "__main__":

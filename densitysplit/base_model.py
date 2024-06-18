@@ -87,7 +87,7 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
     Class implementing two-point correlation function model with a smoothing kernel.
     """
 
-    def __init__(self, *args, smoothing_kernel=6, smoothing_scale=10, nbar=None, **kwargs):
+    def __init__(self, *args, smoothing_kernel=6, smoothing_scale=10, smoothing_scale2=10, nbar=None, **kwargs):
         if len(args) and type(args[0]) is BaseTwoPointCorrelationFunctionModel:
             self.__dict__ = args[0].__dict__.copy()
         else:
@@ -95,7 +95,7 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
         self.logger.info('Initializing SmoothedTwoPointCorrelationFunctionModel')
         self.smoothing_kernel = smoothing_kernel
         self.nbar = nbar
-        self.set_smoothing_scale(smoothing_scale)
+        self.set_smoothing_scale(smoothing_scale, smoothing_scale2)
         self.set_shotnoise(nbar)
 
     def set_shotnoise(self, nbar=None):
@@ -104,13 +104,15 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
             nbar = 0
         self.set_smoothed_xi(nbar)
 
-    def set_smoothing_scale(self, smoothing_scale):
+    def set_smoothing_scale(self, smoothing_scale, smoothing_scale2=None):
         self.logger.info('Setting smoothing scale to {}'.format(smoothing_scale))
+        if smoothing_scale2 is not None:
+            self.logger.info('Setting second smoothing scale to {}'.format(smoothing_scale2))
         self.smoothing_scale = smoothing_scale
+        self.smoothing_scale2 = smoothing_scale2
         self.set_smoothing_kernel_3D(p=self.smoothing_kernel)
         self.set_smoothed_pk_3D()
         self.set_smoothed_xi(nbar=self.nbar)
-        self.compute_double_smoothed_sigma()
 
     def set_smoothing_kernel_3D(self, p=6):
         self.logger.info('Setting 3D smoothing kernel of order {}'.format(p))
@@ -120,12 +122,21 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
             w = reduce(mul, (np.sinc(self.smoothing_scale * kk / 2. / np.pi)**p for kk in kslab), 1)
             w_slab[...].flat = w
         self.smoothing_kernel_3D = cfield
+        if (self.smoothing_scale2 is not None) & (self.smoothing_scale2 != self.smoothing_scale):
+            cfield2 = self.pm.create('complex')
+            for kslab, w_slab in zip(cfield2.slabs.x, cfield2.slabs):
+                w = reduce(mul, (np.sinc(self.smoothing_scale2 * kk / 2. / np.pi)**p for kk in kslab), 1)
+                w_slab[...].flat = w
+            self.smoothing_kernel2_3D = cfield2
 
     def set_smoothed_pk_3D(self):
         self.smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D
-        self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D**2
+        if self.smoothing_scale2 != self.smoothing_scale:
+            self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D * self.smoothing_kernel2_3D
+        else:
+            self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D**2
 
-    def set_smoothed_xi(self, nbar=None):      
+    def set_smoothed_xi(self, nbar=None, smoothing_scale2=None):      
         xiRfield = self.smoothed_pk_3D.c2r()
         xiRfield.value = np.real(xiRfield.value)
         sep, mu, xiR = project_to_basis(xiRfield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
@@ -142,17 +153,15 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
         if self.nbar:
             wfield = self.smoothing_kernel_3D.c2r() / self.boxsize**3
             sep, mu, w = project_to_basis(wfield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
-            sep, mu, w2 = project_to_basis(wfield**2, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
             shotnoise_corr = (1 + self.sigma**2) * w / self.nbar
             self.smoothed_xi  = self.smoothed_xi + np.real(shotnoise_corr)
+
+            if self.smoothing_scale2 != self.smoothing_scale:
+                wfield2 = self.smoothing_kernel2_3D.c2r() / self.boxsize**3
+                sep, mu, w2 = project_to_basis(wfield*wfield2, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+            else:
+                sep, mu, w2 = project_to_basis(wfield**2, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
             shotnoise_corr2 = (1 + self.sigma**2) * w2 / self.nbar
             self.double_smoothed_xi  = self.double_smoothed_xi + np.real(shotnoise_corr2)
 
         return self.smoothed_xi
-
-    def compute_double_smoothed_sigma(self):
-        xifield = self.double_smoothed_pk_3D.c2r()
-        xifield.value = np.real(xifield.value)
-        sep, mu, xi = project_to_basis(xifield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
-        self.double_smoothed_sigma = np.sqrt(xi[0].real)
-        return self.double_smoothed_sigma

@@ -5,4 +5,4 @@
 
 source /feynman/work/dphp/adematti/cosmodesi_environment.sh main
 
-python /feynman/home/dphp/mp270220/densitysplit/bin/density_split_corr.py --redshift 0.8 --nbar 0.0034 --cellsize2 10
+python /feynman/home/dphp/mp270220/densitysplit/bin/density_split_corr.py --redshift 0.8 --nbar 0.0034 --cellsize2 15

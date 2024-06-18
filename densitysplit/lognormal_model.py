@@ -195,13 +195,16 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             self._fixed_density_bins = False
             self.set_params()
 
-    def set_params(self, sigma=None, delta0=None):
+    def set_params(self, sigma=None, delta0=None, delta02=None):
         if sigma is not None:
             self.logger.info('Setting sigma to {:.3f}.'.format(sigma))
             self.sigma = sigma
         if delta0 is not None:
             self.logger.info('Setting delta0 to {:.3f}.'.format(delta0))
             self.delta0 = delta0
+        if delta02 is not None:
+            self.logger.info('Setting delta02 to {:.3f}.'.format(delta02))
+            self.delta02 = delta02
         if not self._fixed_density_bins:
             splits = np.linspace(0, 1, self.nsplits+1)
             self.density_bins = scipy.stats.lognorm.ppf(splits, self.sigma, -self.delta0, self.delta0*np.exp(-self.sigma**2/2.))
@@ -220,23 +223,31 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             self.logger.info('Adding shotnoise correction to the smoothed 2PCF.')
             wfield = model.smoothing_kernel_3D.c2r() / model.boxsize**3
             sep, mu, w = project_to_basis(wfield, edges=(model.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
-            sep, mu, w2 = project_to_basis(wfield**2, edges=(model.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
             shotnoise = np.real(w / self.nbar)
             self.smoothed_xi += shotnoise.ravel()
-            shotnoise = np.real((1 + model.sigma**2) * w2 / self.nbar)
+
+            if model.smoothing_scale2 != model.smoothing_scale:
+                square_cfield = model.smoothing_kernel_3D * model.smoothing_kernel2_3D
+            else:
+                square_cfield = model.smoothing_kernel_3D**2
+            wfield = square_cfield.c2r() / model.boxsize**3
+            sep, mu, w2 = project_to_basis(wfield, edges=(model.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+            shotnoise = np.real(w2 / self.nbar)
             self.double_smoothed_xi  += shotnoise.ravel()
 
-    def _compute_main_term(self, delta, sigma=None, delta0=None, delta01=1., xiR=None, sep=None, **kwargs):
-        self.set_params(sigma=sigma, delta0=delta0)
-        self.delta01 = delta01
+    def _compute_main_term(self, delta, sigma=None, delta0=None, delta02=1., xiR=None, sep=None, smoothing=1, **kwargs):
+        self.set_params(sigma=sigma, delta0=delta0, delta02=delta02)
         if sep is not None:
             self.sep = sep
         if xiR is None:
             if not hasattr(self, 'smoothed_xi'):
                 self.set_smoothed_xi_model(**kwargs)
-            xiR = self.smoothed_xi
+            if smoothing == 1:
+                xiR = self.smoothed_xi
+            elif smoothing > 1:
+                xiR = self.double_smoothed_xi
         if math.isfinite(delta):
-            a = scipy.special.erf((np.log(1 + delta/self.delta0) + self.sigma**2/2. - np.log(1 + xiR/(self.delta0*self.delta01))) / (np.sqrt(2) * self.sigma))
+            a = scipy.special.erf((np.log(1 + delta/self.delta0) + self.sigma**2/2. - np.log(1 + xiR/(self.delta0*self.delta02))) / (np.sqrt(2) * self.sigma))
             b = scipy.special.erf((np.log(1 + delta/self.delta0) + self.sigma**2/2.) / (np.sqrt(2) * self.sigma))
         else:
             if delta > 0:
@@ -258,7 +269,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             a1, b1 = self._compute_main_term(d1, delta0=delta0, **kwargs)
             a2, b2 = self._compute_main_term(d2, delta0=delta0, **kwargs)
             main_term = (a2 - a1) / (b2 - b1)
-            dsplits.append(self.delta01*(main_term - 1))
+            dsplits.append(self.delta02*(main_term - 1))
         if rsd:
             dsplits_rsd = list()
             for ds in range(len(dsplits)):

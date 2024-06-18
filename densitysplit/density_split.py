@@ -137,11 +137,11 @@ class DensitySplit(BaseClass):
         elif mesh==2:
             density_mesh = self.density_mesh2
         if positions=='data':
-            pos = self.positions - self.offset
+            pos = self.data.positions - self.offset
             densities = density_mesh.readout(pos.T, resampler=resampler)
             return densities
         if positions=='data_rsd':
-            pos = self.positions_rsd - self.offset
+            pos = self.data.positions_rsd - self.offset
             densities = density_mesh.readout(pos.T, resampler=resampler)
             return densities
         if positions=='randoms':
@@ -196,10 +196,10 @@ class DensitySplit(BaseClass):
         self.nsplits = nsplits
         self.split_bins = bins
         self.split_labels = labels
-        self.split_mesh = split_mesh
-        self.split_indices = split_indices
-        self.split_densities = split_densities
-        self.split_positions = split_positions
+        #self.split_mesh = split_mesh
+        #self.split_indices = split_indices
+        #self.split_densities = split_densities
+        #self.split_positions = split_positions
 
 
     def sample_splits(self, size, seed=42, update=True):
@@ -237,6 +237,9 @@ class DensitySplit(BaseClass):
                 positions2 = None
                 weights2 = None
             else:
+                #rng = np.random.RandomState(seed=seed+1)
+                #positions2 = [o + rng.uniform(0., 1., self.data.size)*b for o, b in zip((self.offset,)*3, (self.boxsize,)*3)]
+                #shifted_positions2 = np.array(positions2) - self.offset
                 positions2 = positions1
                 densities2 = self.density_mesh2.readout(shifted_positions1.T, resampler=self.resampler)
                 weights2 = 1 + densities2
@@ -414,8 +417,8 @@ class DensitySplit(BaseClass):
     def __getstate__(self):
         state = {}
         for name in ['boxsize', 'boxcenter', 'offset',
-                     'use_rsd', 'use_weights', 'cellsize', 'cellsize2', 'resampler', 'density_mesh', 'data_densities',
-                     'nsplits', 'split_bins', 'split_labels', 'split_mesh', 'split_indices', 'split_densities', 'split_positions', 'split_positions_rsd',
+                     'use_rsd', 'use_weights', 'cellsize', 'cellsize2', 'resampler', 'data_densities',
+                     'nsplits', 'split_bins', 'split_labels', #'split_mesh', 'split_indices', 'split_densities', 'split_positions', 'split_positions_rsd',
                      'split_samples', 'smoothed_corr', 'ds_data_corr']:
             if hasattr(self, name):
                 state[name] = getattr(self, name)
@@ -423,6 +426,8 @@ class DensitySplit(BaseClass):
             state['data'] = self.data.__getstate__()
         if hasattr(self, 'density_mesh'):
             state['density_mesh'] = {'array': self.density_mesh.value, 'boxsize': self.density_mesh.pm.BoxSize}
+        if hasattr(self, 'density_mesh2'):
+            state['density_mesh2'] = {'array': self.density_mesh2.value, 'boxsize': self.density_mesh2.pm.BoxSize}
         return state
 
 
@@ -434,6 +439,11 @@ class DensitySplit(BaseClass):
         mesh = pm.create(type='real')
         mesh.unravel(self.density_mesh['array'].ravel())
         self.density_mesh = mesh
+        if hasattr(self, 'density_mesh2'):
+            pm = ParticleMesh(BoxSize=self.density_mesh2['boxsize'], Nmesh=self.density_mesh2['array'].shape, dtype=self.density_mesh2['array'].dtype)
+            mesh2 = pm.create(type='real')
+            mesh2.unravel(self.density_mesh2['array'].ravel())
+            self.density_mesh2 = mesh2
 
 
     @classmethod
