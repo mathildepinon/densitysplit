@@ -75,9 +75,13 @@ if __name__ == '__main__':
         mock_density.compute_density(data=mock, cellsize=args.cellsize, resampler=args.resampler, cellsize2=args.cellsize2, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights)
 
         # compute density splits
-        delta_R = mock_density.readout_density(positions='randoms', rsd=args.rsd, resampler=args.resampler, seed=args.imock)
-        bins = compute_lognormal_split_bins(delta_R, args.nsplits)
-        #bins = np.array([-1., -0.19435888, 0.09070214, np.inf])
+        delta_R = mock_density.readout_density(positions='randoms', resampler=args.resampler, seed=args.imock)
+        #bins = compute_lognormal_split_bins(delta_R, args.nsplits)
+        if args.tracer == 'particles':
+            if args.rsd:
+                bins = np.array([-1., -0.23633639, 0.10123832, np.inf])
+            else:
+                bins = np.array([-1., -0.19435888, 0.09070214, np.inf])
         print('Compute density splits in bins: ', bins)
         mock_density.split_density(args.nsplits, bins=bins)
         
@@ -90,9 +94,11 @@ if __name__ == '__main__':
 
         if args.use_weights:
             weights = mocks.weights
+        else:
+            weights = None
 
-        mock_density.compute_smoothed_corr(edges, positions2=positions, weights2=weights, seed=args.imock, nthreads=32)
-        mock_density.compute_ds_data_corr(edges, positions2=positions, weights2=weights, seed=args.imock, randoms_size=args.randoms_size, nthreads=32)
+        mock_density.compute_smoothed_corr(edges, positions2=positions, weights2=weights, seed=args.imock, los=args.los, nthreads=32)
+        mock_density.compute_ds_data_corr(edges, positions2=positions, weights2=weights, seed=args.imock, randoms_size=args.randoms_size, los=args.los, nthreads=32)
 
         # save result
         if args.env == 'feynman':
