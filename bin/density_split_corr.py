@@ -72,7 +72,7 @@ if __name__ == '__main__':
         # compute density contrast
         mock = catalog_data.Data.load(os.path.join(datadir, simname+'.npy'))
         mock_density = density_split.DensitySplit(mock)
-        mock_density.compute_density(cellsize=args.cellsize, resampler=args.resampler, cellsize2=args.cellsize2, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights)
+        mock_density.compute_density(data=mock, cellsize=args.cellsize, resampler=args.resampler, cellsize2=args.cellsize2, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights)
 
         # compute density splits
         delta_R = mock_density.readout_density(positions='randoms', rsd=args.rsd, resampler=args.resampler, seed=args.imock)
@@ -80,8 +80,19 @@ if __name__ == '__main__':
         #bins = np.array([-1., -0.19435888, 0.09070214, np.inf])
         print('Compute density splits in bins: ', bins)
         mock_density.split_density(args.nsplits, bins=bins)
-        mock_density.compute_smoothed_corr(edges, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights, seed=args.imock, nthreads=32)
-        mock_density.compute_ds_data_corr(edges, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights, seed=args.imock, randoms_size=args.randoms_size, nthreads=32)
+        
+        if args.rsd:
+            if mock.positions_rsd is None:
+                mock.set_rsd(hz=hz, los=los)
+            positions = mock.positions_rsd
+        else:
+            positions = mock.positions
+
+        if args.use_weights:
+            weights = mocks.weights
+
+        mock_density.compute_smoothed_corr(edges, positions2=positions, weights2=weights, seed=args.imock, nthreads=32)
+        mock_density.compute_ds_data_corr(edges, positions2=positions, weights2=weights, seed=args.imock, randoms_size=args.randoms_size, nthreads=32)
 
         # save result
         if args.env == 'feynman':
