@@ -114,14 +114,16 @@ class DensitySplit(BaseClass):
         self.cellsize2 = cellsize2
         
     
-    def readout_density(self, positions='randoms', resampler='tsc', seed=0, mesh=1):
+    def readout_density(self, positions='randoms', size=None, resampler='tsc', seed=0, mesh=1):
+        if size is None:
+            size = self.size
         if mesh==1:
             density_mesh = self.density_mesh
         elif mesh==2:
             density_mesh = self.density_mesh2
-        if positions=='randoms':
+        if isinstance(positions, str) and (positions=='randoms'):
             rng = np.random.RandomState(seed=seed)
-            pos = np.array([rng.uniform(0., 1., self.size)*b for b in (self.boxsize,)*3])
+            pos = np.array([rng.uniform(0., 1., size)*b for b in (self.boxsize,)*3])
         else:
             pos = positions
         densities = density_mesh.readout(pos.T, resampler=resampler)
@@ -254,6 +256,43 @@ class DensitySplit(BaseClass):
         self.ds_data_corr = densitysplits
         
         return densitysplits
+
+    
+    def compute_jointpdf_delta_R1_R2(self, s=None, sample_size=None, mu=None, los='z', seed=0, resampler='tsc', split=None):
+        if sample_size is None:
+            sample_size = self.size
+    
+        ## Generate random particles and readout density at each particle
+        rng = np.random.RandomState(seed=seed)
+        if split is not None:
+            split_samples = self.sample_splits(size=sample_size, seed=seed)
+            positions1 = split_samples[split]
+            sample_size = positions1.shape[1]
+        else:
+            positions1 = np.array([rng.uniform(0., 1., sample_size)*b for b in (self.boxsize,)*3])
+    
+        if mu is None:
+            theta = rng.uniform(0., np.pi, sample_size)
+        else:
+            theta = np.full(sample_size, np.arccos(mu))
+        phi = rng.uniform(0., 2*np.pi, sample_size)
+        
+        if los == 'x':
+            relpos = np.array([s*np.cos(theta), s*np.sin(theta)*np.cos(phi), s*np.sin(theta)*np.sin(phi)])
+        elif los == 'y':
+            relpos = np.array([s*np.sin(theta)*np.sin(phi), s*np.cos(theta), s*np.sin(theta)*np.cos(phi)])
+        elif los == 'z':
+            relpos = np.array([s*np.sin(theta)*np.cos(phi), s*np.sin(theta)*np.sin(phi), s*np.cos(theta)])
+        positions2 = (positions1 + relpos) % self.boxsize
+        
+        delta_R1 = self.readout_density(positions=positions1, resampler=resampler, mesh=1)
+
+        if self.cellsize2 != self.cellsize:
+            delta_R2 = self.readout_density(positions=positions2, resampler=resampler, mesh=2)
+        else:
+            delta_R2 = self.readout_density(positions=positions2, resampler=resampler, mesh=1)
+    
+        return np.array([delta_R1, delta_R2])
 
     
     def show_halos_map(self, fig, ax, cellsize, cut_direction, cut_idx, positions=None, weights=None, split=False,
