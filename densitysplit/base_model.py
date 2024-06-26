@@ -113,7 +113,8 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
         self.set_smoothing_kernel_3D(p=self.smoothing_kernel)
         self.set_smoothed_pk_3D()
         self.set_smoothed_xi(nbar=self.nbar)
-
+        self.compute_double_smoothed_sigma()
+        
     def set_smoothing_kernel_3D(self, p=6):
         self.logger.info('Setting 3D smoothing kernel of order {}'.format(p))
         self.smoothing_kernel = p # order of the smoothing kernel
@@ -165,3 +166,10 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
             self.double_smoothed_xi  = self.double_smoothed_xi + np.real(shotnoise_corr2)
 
         return self.smoothed_xi
+
+    def compute_double_smoothed_sigma(self):
+        xifield = self.double_smoothed_pk_3D.c2r()
+        xifield.value = np.real(xifield.value)
+        sep, mu, xi = project_to_basis(xifield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
+        self.double_smoothed_sigma = np.sqrt(xi[0].real)
+        return self.double_smoothed_sigma
