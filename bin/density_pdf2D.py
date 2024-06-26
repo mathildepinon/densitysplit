@@ -40,7 +40,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     z = args.redshift
-    sep = np.linspace(30, 150, 13)
+    method = 'num'
+    sep = np.linspace(10, 150, 15) if method=='gc' else np.linspace(0, 150, 51)
     
     if args.simulation == 'abacus':
         cosmology=fiducial.AbacusSummitBase()
@@ -77,11 +78,13 @@ if __name__ == '__main__':
 
         plots_dir = '/feynman/home/dphp/mp270220/plots/density'
         plt_fn = 'density_PDF_r{}{}_model.png'.format(args.cellsize, '_RSD' if args.rsd else '')
-        
-        deltaR1, deltaR2 = mock_density.compute_jointpdf_delta_R1_R2(s=100, query_positions='mesh', sample_size=args.size, mu=args.mu, los=args.los)
+
         model = DensitySplitModel(nsplits=args.nsplits, density_bins=bins, nbar=args.nbar)
-        norm = model.compute_ds_nbar(deltaR1, plot_fn=os.path.join(plots_dir, plt_fn))
-        print(norm)
+        
+        if method=='gc':
+            deltaR1, deltaR2 = mock_density.compute_jointpdf_delta_R1_R2(s=100, query_positions='mesh', sample_size=args.size, mu=args.mu, los=args.los)
+            norm = model.compute_ds_nbar(deltaR1, plot_fn=os.path.join(plots_dir, plt_fn))
+            print(norm)
         
         split_xi = list()
         for s in sep:
@@ -89,7 +92,10 @@ if __name__ == '__main__':
             deltaR1, deltaR2 = mock_density.compute_jointpdf_delta_R1_R2(s=s, query_positions='mesh', sample_size=args.size, mu=args.mu, los=args.los)
             plt_fn = 'joint_density_PDF_r{}_r{}_s{}_mu{}{}_model.png'.format(args.cellsize, args.cellsize2, s, args.mu, '_RSD' if args.rsd else '')
             legend=(r'$s = {} \; \mathrm{{Mpc}}/h, \; \mu = {}$'.format(s, args.mu) if args.rsd else r'$s = {} \; \mathrm{{Mpc}}/h$'.format(s))
-            xiRds = model.compute_gram_charlier_dsplits(n=args.exporder, delta1=deltaR1, delta2=deltaR2, bins=args.bins, norm=norm, plot_fn=os.path.join(plots_dir, plt_fn), legend=legend)
+            if method=='gc':
+                xiRds = model.compute_gram_charlier_dsplits(n=args.exporder, delta1=deltaR1, delta2=deltaR2, bins=args.bins, norm=norm, plot_fn=os.path.join(plots_dir, plt_fn), legend=legend)
+            else:
+                xiRds = model.compute_dsplits(delta1=deltaR1, delta2=deltaR2)
             split_xi.append(xiRds)
 
         split_xi = np.array(split_xi).T
@@ -98,7 +104,7 @@ if __name__ == '__main__':
 
         # save result
         outputdir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
-        outputname = simname + '_cellsize{:d}{}_resampler{}_{:d}splits'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, args.nsplits) + '_RH_CCF{}_nummodel'.format('_RSD' if args.rsd else '')
+        outputname = simname + '_cellsize{:d}{}_resampler{}_{:d}splits'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, args.nsplits) + '_RH_CCF{}_{}'.format('_RSD' if args.rsd else '', 'GCmodel' if method=='gc' else 'nummodel')
         print('Saving result at {}'.format(os.path.join(outputdir, outputname)))
         np.save(os.path.join(outputdir, outputname), res)
 
