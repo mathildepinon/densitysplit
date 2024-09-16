@@ -1,3 +1,4 @@
+import os 
 import time
 import logging
 import numpy as np
@@ -7,6 +8,7 @@ from functools import reduce
 from scipy.integrate import quad
 from scipy.optimize import fsolve
 from scipy.interpolate import interp1d
+from scipy.special import factorial
 
 from pycorr import setup_logging
 from .utils import BaseClass
@@ -17,9 +19,10 @@ from pypower.fft_power import project_to_basis
 class LDT(BaseClass):
     """
     Class implementing large deviation theory (LDT) model for the 2D PDF of the matter density field and the bias function.
+    Translated in python from Mathematica package LSSFast, see Uhlemann et al. 2017 (arxiv:1607.01026), and Codis et al. 2016 (arXiv:1602.03562).
     """
     _defaults = dict(redshift=None, cosmology=None, k=np.logspace(-5, 3, 100000), pk=None, 
-                     damping=False, non_linear=False, b1=1., shotnoise=0, boxsize=1000, nmesh=512,
+                     damping=False, non_linear=False, b1=1., shotnoise=0, nbar=None, iso=True, boxsize=1000, nmesh=512,
                      smoothing_kernel=6, smoothing_scale=10)
 
     def __init__(self, **kwargs):
@@ -48,9 +51,10 @@ class LDT(BaseClass):
             else:
                 pk = pk_callable
         self.pk = pk
-        self.logger.info('Initializing ParticleMesh with boxisze {}, nmesh {}'.format(self.boxsize, self.nmesh))
-        self.pm = ParticleMesh(BoxSize=[self.boxsize] * 3, Nmesh=[self.nmesh] * 3, dtype='c16')
-        self.set_pk_3D()
+        if not self.iso:
+            self.logger.info('Initializing ParticleMesh with boxisze {}, nmesh {}'.format(self.boxsize, self.nmesh))
+            self.pm = ParticleMesh(BoxSize=[self.boxsize] * 3, Nmesh=[self.nmesh] * 3, dtype='c16')
+            self.set_pk_3D()
         self.set_smoothing_scale(self.smoothing_scale)
 
     def set_pk_3D(self):
@@ -72,8 +76,11 @@ class LDT(BaseClass):
 
     def set_smoothing_scale(self, smoothing_scale):
         self.smoothing_scale = smoothing_scale
-        self.set_smoothing_kernel_3D(p=self.smoothing_kernel)
-        self.set_smoothed_pk_3D()
+        if self.iso:
+            self.set_smoothing_kernel()
+        else:
+            self.set_smoothing_kernel_3D(p=self.smoothing_kernel)
+            self.set_smoothed_pk_3D()
         self.compute_sigma()
 
     def set_smoothing_kernel_3D(self, p=6):
@@ -83,13 +90,22 @@ class LDT(BaseClass):
             w = reduce(mul, (np.sinc(self.smoothing_scale * kk / 2. / np.pi)**p for kk in kslab), 1)
             w_slab[...].flat = w
         self.smoothing_kernel_3D = cfield
+
+    def set_smoothing_kernel(self):
+        ngp_smoothing_kernel = np.sinc(self.smoothing_scale * self.k / 2. / np.pi)**2
+        self.smoothing_kernel = 3 * (self.smoothing_scale * self.k * np.cos(self.smoothing_scale * self.k) - np.sin(self.smoothing_scale * self.k)) / (self.k**3 * self.smoothing_scale**3)
  
     def set_smoothed_pk_3D(self):
         self.smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D
         self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D**2
 
     def compute_sigma(self):
-        val = np.real(np.sum(self.double_smoothed_pk_3D))   
+        if self.iso:
+            val = np.trapz((self.pk(self.k)) * self.k**2 * self.smoothing_kernel**2, self.k)
+        else: 
+            val = np.real(np.sum(self.double_smoothed_pk_3D))   
+        #if self.nbar is not None:
+        #    val += 1 / (self.nbar * 4/3 * np.pi * self.smoothing_scale**3)
         self.sigma = np.sqrt(val)
         return self.sigma
 
@@ -103,29 +119,24 @@ class LDT(BaseClass):
 
     def interpolate_sigma(self, tab_fn=None):
         #r = sp.symbols('r')
-        if tab_fn is not None:
+        if tab_fn is not None and os.path.isfile(tab_fn):
             Rvals, sigmavals = np.load(tab_fn)
         else:
             logRvals = np.arange(np.log(0.01**(1/3)), np.log(10**(1 + 1/3 + 1)), 0.2)
             self.logger.info('Interpolating sigma for {} R log-spaced values between {} and {}'.format(len(logRvals), np.min(logRvals), np.max(logRvals)))
             Rvals = np.exp(logRvals)
             sigmavals = [self.get_sigma(Rval) for Rval in Rvals]
+            if tab_fn is not None:
+                self.logger.info("Saving tabluated sigma values: {}.".format(tab_fn))
+                np.save(tab_fn, np.array([Rvals, sigmavals]))
         self.Rvals = Rvals
         self.sigmavals = sigmavals
         #self.sigma_interp = sp.functions.special.bsplines.interpolating_spline(7, r, Rvals, sigmavals)
         self.sigma_interp = interp1d(Rvals, sigmavals, kind=7)
 
-    def compute_ldt(self, sigma_val, nu_val=21/13):
-        #x, y, nu, r, s = sp.symbols('x y nu r s')
-        #Zeta = 1 / (1 - x / nu)**nu
-        #self.Tau = sp.solve(y - Zeta, x)[0]
-        #tau = sp.utilities.lambdify([y, nu], self.Tau, 'numpy')
-        #self.Psi = (1 / 2) * self.Tau**2 / self.sigma_interp.subs(r, y**(1 / 3)*self.smoothing_scale)**2 * self.sigma_interp.subs(r, self.smoothing_scale)**2
-        #self.dPsi = sp.diff(self.Psi, y)
-        #self.ddPsi = sp.diff(self.Psi, y, y)
-        #self.Lowlogrho = (1 / sp.sqrt(2 * sp.pi)) * (1 / s) * sp.sqrt(self.ddPsi + self.dPsi / y) * sp.exp(-1 / s**2 * self.Psi)
-        self.yvals = np.linspace(0.1, 10, 1000)
-        self.nu = nu_val
+    def compute_ldt(self, sigma_val, nu=21/13, k=None):
+        self.yvals = np.arange(0.03, 11, 0.01)
+        self.nu = nu
         self.Tau = lambda y: self.nu*(1 - (1/y)**(1/self.nu))
         self.tau = self.nu*(1 - (1/self.yvals)**(1/self.nu))
         self.psi = (1 / 2) * self.tau**2 / self.sigma_interp(self.yvals**(1 / 3)*self.smoothing_scale)**2 * self.sigma_interp(self.smoothing_scale)**2
@@ -133,14 +144,12 @@ class LDT(BaseClass):
         self.ddpsi = np.gradient(self.dpsi, self.yvals, edge_order=2)
         self.lowlogrho = lambda s : (1 / np.sqrt(2 * np.pi)) * (1 / s) * np.sqrt(self.ddpsi + self.dpsi / self.yvals) * np.exp(-1 / s**2 * self.psi)
         self.sigma_val = sigma_val
+        self.norm = self.nbar * 4/3 * np.pi * self.smoothing_scale**3
         self.eff_sigma_log = self.effsiglog()
+        self.kvals = k
         self.expbiasnorm()
 
     def logs(self, order, s_val):
-        #y, nu, s = sp.symbols('y nu s')
-        #lowlogrho = self.Lowlogrho.subs({s: s_val, nu: nu_val})
-        #func = sp.utilities.lambdify(y, y**order * lowlogrho, 'numpy') # returns a numpy-ready function
-        #res = quad(func, 0.1, 10)[0]
         res = np.trapz(self.yvals**order * self.lowlogrho(s_val), x=self.yvals)
         return res
 
@@ -151,37 +160,158 @@ class LDT(BaseClass):
         solution = fsolve(func, self.sigma_val)
         return solution[0]
 
-    def density_pdf(self, rho):
+    def density_pdf_noshotnoise(self, rho):
         logs1 = self.logs(1, self.eff_sigma_log)
         self.logs1 = logs1
         logs0 = self.logs(0, self.eff_sigma_log)
         self.logs0 = logs0
-        lowlogrho = interp1d(self.yvals, self.lowlogrho(self.eff_sigma_log), kind=7)(rho * logs1/logs0)
+        lowlogrho_func = interp1d(self.yvals, self.lowlogrho(self.eff_sigma_log), kind=7)
+        if (isinstance(rho, list) or isinstance(rho, np.ndarray)) and len(rho) > 0:
+            lowlogrho = np.array([lowlogrho_func(rhoo * logs1/logs0) for rhoo in rho])
+        else:
+            lowlogrho = lowlogrho_func(rho * logs1/logs0)
         return logs1 / logs0**2 * lowlogrho
+
+    def density_pdf(self, rho=None, k=None): # convolve density PDF with Poisson shot noise
+        if self.nbar is None:
+            return self.density_pdf_noshotnoise(rho)
+        else:
+            ymax = 9
+            mask = self.yvals < ymax
+            x = self.yvals[mask]
+            #self.xvals = x
+            #x = self.xvals
+            density_pdfvals = self.density_pdf_noshotnoise(x)
+            norm = self.norm
+            def func(N):
+                poisson_pdf = (norm * x[:, None])**N * np.exp(-norm * x[:, None]) / factorial(N)
+                res = np.trapz(poisson_pdf * density_pdfvals[:, None], x=x, axis=0)
+                return res
+            if (k is None) and (rho is not None):
+                k = np.floor(norm * rho)
+                k = np.append(k, np.max(k)+1)
+                return interp1d(k, func(k))(norm * rho) * norm
+            else:
+                if k is None:
+                    k=self.kvals
+                return func(k)
 
     def lowrhobias(self, rho):
         return self.sigma_interp(self.smoothing_scale)**2 / (self.sigma_interp(rho**(1 / 3) * self.smoothing_scale)**2 * self.eff_sigma_log**2) * self.Tau(rho)
 
     def expbiasnorm(self):
         ymax = 9
-        mask = self.yvals < ymax
-        x = self.yvals[mask]
-        self.xvals = x
+        if self.kvals is None:
+            mask = self.yvals < ymax
+            x = self.yvals[mask]
+            self.xvals = x
+            self.density_pdfvals = self.density_pdf(x)
+        else:
+            x = self.kvals/self.norm
+            mask = (x>=0.03) & (x<ymax)
+            x = x[mask]
+            self.xvals = x
+            self.density_pdfvals = self.density_pdf(k=self.kvals[mask])*self.norm
         lowrhobias = self.lowrhobias(x)
         self.low_rho_bias = lowrhobias
-        self.density_pdfvals = np.array([self.density_pdf(rho) for rho in x])
-        self.exp_bias_norm = np.trapz(lowrhobias * self.density_pdfvals, x=x)
+        if self.kvals is None:
+            self.exp_bias_norm = np.trapz(lowrhobias * self.density_pdfvals, x=x)
+        else:
+            self.exp_bias_norm = np.sum(lowrhobias * self.density_pdfvals)/self.norm
         return self.exp_bias_norm
     
     def exprhobiasnorm(self):
         integrand = self.xvals * (self.low_rho_bias - self.exp_bias_norm) * self.density_pdfvals
-        return np.trapz(integrand, x=self.xvals)
+        if self.kvals is None:
+            return np.trapz(integrand, x=self.xvals)
+        else:
+            return np.sum(integrand)/self.norm
     
     # bias function
     def bias(self, rho):
         rho_bias_norm = self.exprhobiasnorm()
         res = (self.lowrhobias(rho) - self.exp_bias_norm)  / rho_bias_norm
         return res
+
+
+class LDTDensitySplitModel(LDT):
+    """
+    Class implementing LDT model for density-split statistics.
+    """
+
+    def __init__(self, *args, nsplits=3, density_bins=None, **kwargs):
+        if len(args) and isinstance(args[0], LDT):
+            self.__dict__ = args[0].__dict__.copy()
+        else:
+            super().__init__(**kwargs)
+        self.logger.info('Initializing LDTDensitySplitModel with {} density splits'.format(nsplits))
+        self.nsplits = nsplits
+        self._fixed_density_bins = True
+        self.density_bins = density_bins
+        if density_bins is None:
+            self._fixed_density_bins = False
+
+    def joint_density_pdf(self, rho1, rho2, xi):
+        pdf1 = self.density_pdf(rho1)
+        pdf2 = self.density_pdf(rho2)
+        b1 = self.bias(rho1)
+        b2 = self.bias(rho2)
+        res = pdf1 * pdf2 * (1 + np.array(xi)[..., None, None] * b1 * b2)
+        return res
+
+    def compute_dsplits(self, xi, nsplits=None, density_bins=None):
+        if nsplits is not None:
+            self.nsplits = nsplits
+        if density_bins is not None:
+            self.density_bins = density_bins
+        xvals = self.xvals
+        yvals = xvals[xvals < 8]
+        rho1, rho2 = np.meshgrid(xvals, yvals)
+        innerint = np.trapz(rho2 * self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2)
+        dsplits = list()
+        for i in range(len(self.density_bins)-1):
+            d1 = max(self.density_bins[i], -1)
+            d2 = self.density_bins[i+1]
+            self.logger.info('Computing LDT density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
+            t0 = time.time()
+            ds_mask = (rho1[0] >= 1 + d1) & (rho1[0] < 1 + d2)
+            outerint = np.trapz(innerint[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
+            #norm =  np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2)[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
+            print(outerint[-1])
+            norm = np.trapz(self.density_pdf(rho1[0][ds_mask]), x=rho1[0][ds_mask])
+            print(norm)
+            #print(np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2), x=rho1[0], axis=-1))
+            res = outerint/norm - 1
+            self.logger.info('Computed LDT model in split {:.2f}, {:.2f} for {} xi values in elapsed time: {}s'.format(d1, d2, len(np.array(xi)), time.time()-t0))
+            dsplits.append(res)
+        return dsplits
+
+    def compute_dsplits_test(self, nsplits=None, density_bins=None, density_pdf=None, joint_density_pdf=None, x1=None, x2=None):
+        if nsplits is not None:
+            self.nsplits = nsplits
+        if density_bins is not None:
+            self.density_bins = density_bins
+        rho1, rho2 = 1+x1, 1+x2
+        innerint = np.trapz(rho2 * joint_density_pdf, x=rho2[:, 0], axis=-2)
+        dsplits = list()
+        for i in range(len(self.density_bins)-1):
+            d1 = max(self.density_bins[i], -1)
+            d2 = self.density_bins[i+1]
+            self.logger.info('Computing LDT density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
+            t0 = time.time()
+            ds_mask = (rho1[0] >= 1 + d1) & (rho1[0] < 1 + d2)
+            outerint = np.trapz(innerint[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
+            #norm =  np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2)[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
+            print(outerint)
+            norm = np.trapz(density_pdf[ds_mask], x=rho1[0][ds_mask])
+            print(norm)
+            #print(np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2), x=rho1[0], axis=-1))
+            res = outerint/norm - 1
+            dsplits.append(res)
+        return dsplits
+    
+        
+        
 
 
 

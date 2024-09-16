@@ -1,6 +1,6 @@
 import os
 import copy
-
+import pickle
 import numpy as np
 import pandas
 import matplotlib as mpl
@@ -114,12 +114,22 @@ class Data:
 
 
     def save(self, filename):
-        np.save(filename, self.__getstate__(), allow_pickle=True)
+        try:
+            np.save(filename, self.__getstate__(), allow_pickle=True)
+        except:
+            # for large catalogs, need pickle protocol 4:
+            with open(filename+'.npy', 'wb') as f:
+                pickle.dump(self.__getstate__(), f, protocol=4)
 
 
     @classmethod
     def load(cls, filename):
-        state = np.load(filename, allow_pickle=True)[()]
+        try:
+            state = np.load(filename, allow_pickle=True)[()]
+        except:
+            # for large catalogs:
+            with open(filename, 'rb') as f:
+                state = pickle.load(f)
         new = cls.__new__(cls)
         new.__setstate__(state)
         return new

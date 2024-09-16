@@ -195,7 +195,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             self._fixed_density_bins = False
             self.set_params()
 
-    def set_params(self, sigma=None, delta0=None, delta02=None):
+    def set_params(self, sigma=1, delta0=1, delta02=1, sigma2=1):
         if sigma is not None:
             self.logger.info('Setting sigma to {:.3f}.'.format(sigma))
             self.sigma = sigma
@@ -205,10 +205,22 @@ class LognormalDensitySplitModel(LognormalDensityModel):
         if delta02 is not None:
             self.logger.info('Setting delta02 to {:.3f}.'.format(delta02))
             self.delta02 = delta02
+        if sigma2 is not None:
+            self.logger.info('Setting sigma2 to {:.3f}.'.format(sigma2))
+            self.sigma2 = sigma2
         if not self._fixed_density_bins:
             splits = np.linspace(0, 1, self.nsplits+1)
             self.density_bins = scipy.stats.lognorm.ppf(splits, self.sigma, -self.delta0, self.delta0*np.exp(-self.sigma**2/2.))
             self.logger.info('No density bins provided, computing density bins from a lognormal density with sigma = {:.3f}, delta0 = {:.3f}: {}.'.format(self.sigma, self.delta0, self.density_bins))
+
+    def density2D(self, delta,  sigma=None, delta0=None, delta02=None, sigma2=None, cov=None):
+        self.set_params(sigma, delta0, delta02, sigma2)
+        # lognormal transform
+        X = np.log(1 + delta[..., 0]/self.delta0) + sigma**2/2
+        Y = np.log(1 + delta[..., 1]/self.delta02) + sigma2**2/2
+        pdf_model = scipy.stats.multivariate_normal(mean=[0, 0], cov=cov).pdf(np.array([X, Y]).T)
+        pdf_model = pdf_model / ((self.delta0 + delta[..., 0])*(self.delta02 + delta[..., 1]))
+        return pdf_model
 
     def set_smoothed_xi_model(self, **kwargs):
         if 'nbar' in kwargs.keys():
@@ -235,6 +247,21 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             shotnoise = np.real(w2 / self.nbar)
             self.double_smoothed_xi  += shotnoise.ravel()
 
+    def compute_bias_function(self, delta, sigma=None, delta0=None, delta02=1., xiR=None, sep=None, **kwargs):
+        self.set_params(sigma=sigma, delta0=delta0, delta02=delta02)
+        if sep is not None:
+            self.sep = sep
+        if xiR is None:
+            if not hasattr(self, 'smoothed_xi'):
+                self.set_smoothed_xi_model(**kwargs)
+            if smoothing == 1:
+                xiR = self.smoothed_xi
+            elif smoothing > 1:
+                xiR = self.double_smoothed_xi
+        logxiR = np.log(1 + xiR/(self.delta0*self.delta02))
+        res = (1-self.delta0) * (self.delta0 + delta) + self.delta0**2 * np.exp(- logxiR**2/(2 * self.sigma**2) + np.log(1 + delta/self.delta0) + logxiR/self.sigma**2 * (np.log(1 + delta/self.delta0) + self.sigma**2/2))
+        return (res-1)/xiR
+
     def _compute_main_term(self, delta, sigma=None, delta0=None, delta02=1., xiR=None, sep=None, smoothing=1, **kwargs):
         self.set_params(sigma=sigma, delta0=delta0, delta02=delta02)
         if sep is not None:
@@ -258,11 +285,13 @@ class LognormalDensitySplitModel(LognormalDensityModel):
                 b = np.full_like(xiR, -1)
         return a, b
     
-    def compute_dsplits(self, delta0=None, rsd=False, ells=[0, 2, 4], mu=None, **kwargs):
-        self.logger.info('Computing lognormal density split model.')
+    def compute_dsplits(self, delta0=None, rsd=False, ells=[0, 2, 4], mu=None, density_bins=None, **kwargs):
         if delta0 is None:
             delta0 = self.delta0
         dsplits = list()
+        if density_bins is not None:
+            self.density_bins = density_bins
+        self.logger.info('Computing lognormal density split model with bins {}.'.format(self.density_bins))
         for i in range(len(self.density_bins)-1):
             d1 = max(self.density_bins[i], -delta0)
             d2 = self.density_bins[i+1]

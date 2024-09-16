@@ -132,10 +132,11 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
 
     def set_smoothed_pk_3D(self):
         self.smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D
+        self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D**2
         if self.smoothing_scale2 != self.smoothing_scale:
-            self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D * self.smoothing_kernel2_3D
+            self.double_smoothed_pk2_3D = self.pk_3D * self.smoothing_kernel_3D * self.smoothing_kernel2_3D
         else:
-            self.double_smoothed_pk_3D = self.pk_3D * self.smoothing_kernel_3D**2
+            self.double_smoothed_pk2_3D = self.double_smoothed_pk_3D
 
     def set_smoothed_xi(self, nbar=None, smoothing_scale2=None):      
         xiRfield = self.smoothed_pk_3D.c2r()
@@ -144,7 +145,7 @@ class SmoothedTwoPointCorrelationFunctionModel(BaseTwoPointCorrelationFunctionMo
         self.smoothed_xi = np.real(xiR)
         self.smoothed_sigma = np.sqrt(np.real(xiR))
 
-        xiRRfield = self.double_smoothed_pk_3D.c2r()
+        xiRRfield = self.double_smoothed_pk2_3D.c2r()
         xiRRfield.value = np.real(xiRRfield.value)
         sep, mu, xiRR = project_to_basis(xiRRfield, edges=(self.s, np.array([-1., 1.])), exclude_zero=False)[0][:3]
         self.double_smoothed_xi = np.real(xiRR)

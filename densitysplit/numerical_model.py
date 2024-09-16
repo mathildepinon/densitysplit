@@ -75,24 +75,41 @@ class DensitySplitModel(BaseClass):
         return np.array(res)
             
 
-    def compute_dsplits(self, delta1=None, delta2=None, norm=None):
+    def compute_dsplits(self, delta1=None, delta2=None, norm=None, mu=None, ells=[0, 2, 4]):
+
         res = list()
-        norm = list()
 
         for i in range(self.nsplits):
             split_min = self.density_bins[i]
             split_max = self.density_bins[i+1]
  
             split_mask = (delta1 > split_min) & (delta1 <= split_max)
-            nrm = np.sum(split_mask)/len(delta1)
-            dsplit = np.mean(1 + delta2[split_mask])*nrm
-            res.append(dsplit) 
-            norm.append(nrm) 
+            if mu is not None:
+                #nrm = np.sum(split_mask)/(delta1.shape[0]*delta1.shape[1]) if norm is None else norm[i]
+                dsplit = np.array([np.mean(1 + delta2[i, split_mask[i]]) for i in range(len(mu))]) - 1
+                dsplit_poles = [(2*ell + 1)/2. * np.trapz(dsplit * scipy.special.legendre(ell)(mu), x=mu) for ell in ells]
+                res.append(np.array(dsplit_poles))
+            else:
+                # NB: actually no need for the norm, it compensates out
+                #nrm = np.sum(split_mask)/len(delta1) if norm is None else norm[i] 
+                dsplit = np.mean(1 + delta2[split_mask])
+                res.append(dsplit -1)
+                
+        return np.array(res)
 
-        #if norm is None:
-        #    norm = self.compute_ds_nbar(delta1, bins=bins)
-        print('norm: ', norm)
-        return np.array(res)/norm - 1
+        
+    def compute_bias_function(self, delta1=None, delta2=None, edges=None):
+
+        res = list()
+
+        for i in range(len(edges)-1):
+            mask = (delta1 >= edges[i]) & (delta1 < edges[i+1])
+            b = np.mean(delta2[mask])
+            res.append(b)
+
+        bias_func = np.array(res)
+                
+        return bias_func
 
 
     def compute_gram_charlier_dsplits(self, n=3, delta1=None, delta2=None, bins=100, norm=None, plot_fn=None, legend=None):        

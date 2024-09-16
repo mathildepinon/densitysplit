@@ -26,7 +26,7 @@ class GramCharlier1D(BaseClass):
         self.order = n
 
     def hermite_proba(self, i, x):
-        return 2**(-self.order/2) * hermite(i)(x/np.sqrt(2))
+        return 2**(-i/2) * hermite(i)(x/np.sqrt(2))
     
     def termi(self, x, i):
         GCcum = np.mean(self.hermite_proba(i, self.standsample))
