@@ -123,6 +123,7 @@ class LDT(BaseClass):
             Rvals, sigmavals = np.load(tab_fn)
         else:
             logRvals = np.arange(np.log(0.01**(1/3)), np.log(10**(1 + 1/3 + 1)), 0.2)
+            #logRvals = np.arange(-10, np.log(10**(1 + 1/3 + 1)), 0.1)
             self.logger.info('Interpolating sigma for {} R log-spaced values between {} and {}'.format(len(logRvals), np.min(logRvals), np.max(logRvals)))
             Rvals = np.exp(logRvals)
             sigmavals = [self.get_sigma(Rval) for Rval in Rvals]
@@ -132,7 +133,7 @@ class LDT(BaseClass):
         self.Rvals = Rvals
         self.sigmavals = sigmavals
         #self.sigma_interp = sp.functions.special.bsplines.interpolating_spline(7, r, Rvals, sigmavals)
-        self.sigma_interp = interp1d(Rvals, sigmavals, kind=7)
+        self.sigma_interp = interp1d(Rvals, sigmavals, kind=7, bounds_error=False)
 
     def compute_ldt(self, sigma_val, nu=21/13, k=None):
         self.yvals = np.arange(0.03, 11, 0.01)
@@ -179,8 +180,6 @@ class LDT(BaseClass):
             ymax = 9
             mask = self.yvals < ymax
             x = self.yvals[mask]
-            #self.xvals = x
-            #x = self.xvals
             density_pdfvals = self.density_pdf_noshotnoise(x)
             norm = self.norm
             def func(N):
@@ -188,13 +187,15 @@ class LDT(BaseClass):
                 res = np.trapz(poisson_pdf * density_pdfvals[:, None], x=x, axis=0)
                 return res
             if (k is None) and (rho is not None):
-                k = np.floor(norm * rho)
-                k = np.append(k, np.max(k)+1)
-                return interp1d(k, func(k))(norm * rho) * norm
+                k = np.round(norm * rho)
+                #k = np.append(k, np.max(k)+1)
+                #return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm
+                #return func(k.ravel()).reshape(k.shape) * norm
+                return interp1d(k.ravel(), func(k.ravel()), bounds_error=False, fill_value=0)(norm * rho) * norm
             else:
                 if k is None:
                     k=self.kvals
-                return func(k)
+                return func(k.ravel()).reshape(k.shape) * norm # k may not be flat
 
     def lowrhobias(self, rho):
         return self.sigma_interp(self.smoothing_scale)**2 / (self.sigma_interp(rho**(1 / 3) * self.smoothing_scale)**2 * self.eff_sigma_log**2) * self.Tau(rho)
@@ -208,10 +209,10 @@ class LDT(BaseClass):
             self.density_pdfvals = self.density_pdf(x)
         else:
             x = self.kvals/self.norm
-            mask = (x>=0.03) & (x<ymax)
+            mask = (x>=np.min(self.yvals)) & (x<ymax)
             x = x[mask]
             self.xvals = x
-            self.density_pdfvals = self.density_pdf(k=self.kvals[mask])*self.norm
+            self.density_pdfvals = self.density_pdf(k=self.kvals[mask])
         lowrhobias = self.lowrhobias(x)
         self.low_rho_bias = lowrhobias
         if self.kvals is None:
@@ -251,59 +252,103 @@ class LDTDensitySplitModel(LDT):
         if density_bins is None:
             self._fixed_density_bins = False
 
-    def joint_density_pdf(self, rho1, rho2, xi):
-        pdf1 = self.density_pdf(rho1)
-        pdf2 = self.density_pdf(rho2)
+    def joint_density_pdf_nonorm(self, xi, rho1=None, rho2=None):
+        if (rho1 is None) & (self.kvals is not None):
+            k1, k2 = np.meshgrid(self.kvals, self.kvals, indexing='ij')
+            rho1, rho2 = k1/self.norm, k2/self.norm
+            pdf1 = self.density_pdf(k=k1)
+            pdf2 = self.density_pdf(k=k2)
+        else:
+            pdf1 = self.density_pdf(rho1)
+            pdf2 = self.density_pdf(rho2)
         b1 = self.bias(rho1)
         b2 = self.bias(rho2)
         res = pdf1 * pdf2 * (1 + np.array(xi)[..., None, None] * b1 * b2)
+        res[np.isnan(res)] = 0
         return res
 
-    def compute_dsplits(self, xi, nsplits=None, density_bins=None):
+    def joint_density_pdf(self, xi, rho1=None, rho2=None):
+        if (rho1 is None) & (self.kvals is not None):
+            k1, k2 = np.meshgrid(self.kvals, self.kvals, indexing='ij')
+            rho1, rho2 = k1/self.norm, k2/self.norm
+            res = self.joint_density_pdf_nonorm(xi)
+        else:
+            res = self.joint_density_pdf_nonorm(xi, rho1, rho2)
+        # renormalize
+        norm = np.trapz(np.trapz(res, x=rho2[0, :], axis=-1), x=rho1[:, 0], axis=-1)
+        #print('norm: ', norm)
+        avg = np.trapz(np.trapz(rho2*res, x=rho2[0, :], axis=-1), x=rho1[:, 0], axis=-1)
+        #print('avg: ', avg)
+        beta = avg/norm
+        alpha = avg**2 / norm**3
+        alpha = alpha[..., None, None]
+        beta = beta[..., None, None]
+        res = alpha * self.joint_density_pdf_nonorm(xi, beta*rho1[None, ...], beta*rho2[None, ...])
+        return res
+
+    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None):
         if nsplits is not None:
             self.nsplits = nsplits
         if density_bins is not None:
             self.density_bins = density_bins
-        xvals = self.xvals
-        yvals = xvals[xvals < 8]
-        rho1, rho2 = np.meshgrid(xvals, yvals)
-        innerint = np.trapz(rho2 * self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2)
+        if x is None:
+            if self.kvals is not None:
+                xvals = yvals = self.kvals/self.norm
+            else:
+                xvals = self.xvals
+                xvals = yvals = xvals[xvals < 9]
+        else:
+            test = self.kvals/self.norm
+            xvals, yvals = 1+x[0], 1+x[1]
+        rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
+        if self.kvals is not None:
+            density_pdf_2D = self.joint_density_pdf(xi)
+        else:
+            density_pdf_2D = self.joint_density_pdf(xi, rho1=rho1, rho2=rho2)
+        innerint = np.trapz(rho2 * density_pdf_2D, x=yvals, axis=-1)
         dsplits = list()
         for i in range(len(self.density_bins)-1):
             d1 = max(self.density_bins[i], -1)
             d2 = self.density_bins[i+1]
             self.logger.info('Computing LDT density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
             t0 = time.time()
-            ds_mask = (rho1[0] >= 1 + d1) & (rho1[0] < 1 + d2)
-            outerint = np.trapz(innerint[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
-            #norm =  np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2)[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
-            print(outerint[-1])
-            norm = np.trapz(self.density_pdf(rho1[0][ds_mask]), x=rho1[0][ds_mask])
-            print(norm)
-            #print(np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2), x=rho1[0], axis=-1))
+            ds_mask = (rho1[:, 0] >= 1 + d1) & (rho1[:, 0] < 1 + d2)
+            outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+            norm =  np.trapz(np.trapz(density_pdf_2D, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+            #norm = np.trapz(self.density_pdf(rho1[:, 0][ds_mask]), x=rho1[:, 0][ds_mask])
+            #print(norm)
             res = outerint/norm - 1
             self.logger.info('Computed LDT model in split {:.2f}, {:.2f} for {} xi values in elapsed time: {}s'.format(d1, d2, len(np.array(xi)), time.time()-t0))
             dsplits.append(res)
         return dsplits
 
-    def compute_dsplits_test(self, nsplits=None, density_bins=None, density_pdf=None, joint_density_pdf=None, x1=None, x2=None):
+    def compute_dsplits_test(self, nsplits=None, density_bins=None, joint_density_pdf=None, x1=None, x2=None):
         if nsplits is not None:
             self.nsplits = nsplits
         if density_bins is not None:
             self.density_bins = density_bins
         rho1, rho2 = 1+x1, 1+x2
-        innerint = np.trapz(rho2 * joint_density_pdf, x=rho2[:, 0], axis=-2)
+        alpha = np.trapz(np.trapz(rho2*joint_density_pdf, x=rho1[:, 0], axis=-2), x=rho2[0, :], axis=-1)
+        #joint_density_pdf /= norm_test[..., None, None]
+        innerint = np.trapz(rho2 * joint_density_pdf, x=rho2[0, :], axis=-1)
+        norm_test = np.trapz(np.trapz(joint_density_pdf, x=rho1[:, 0], axis=-2), x=rho2[0, :], axis=-1)
+        print('2D pdf normalization: 1 = ', norm_test)
+        norm_test = np.trapz(np.trapz(rho2*joint_density_pdf, x=rho1[:, 0], axis=-2), x=rho2[0, :], axis=-1)
+        print('2D pdf avg: 1 = ', norm_test)
+        #norm_test = np.trapz(density_pdf, x=rho1[:, 0])
+        #print('1D pdf normalization: 1 = ', norm_test)
+        #density_pdf /= norm_test
         dsplits = list()
         for i in range(len(self.density_bins)-1):
             d1 = max(self.density_bins[i], -1)
             d2 = self.density_bins[i+1]
             self.logger.info('Computing LDT density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
             t0 = time.time()
-            ds_mask = (rho1[0] >= 1 + d1) & (rho1[0] < 1 + d2)
-            outerint = np.trapz(innerint[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
-            #norm =  np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2)[..., ds_mask], x=rho1[0][ds_mask], axis=-1)
-            print(outerint)
-            norm = np.trapz(density_pdf[ds_mask], x=rho1[0][ds_mask])
+            ds_mask = (rho1[:, 0] >= 1 + d1) & (rho1[:, 0] < 1 + d2)
+            outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+            norm =  np.trapz(np.trapz(joint_density_pdf, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+            #print(outerint)
+            #norm = np.trapz(density_pdf[ds_mask], x=rho1[:, 0][ds_mask])
             print(norm)
             #print(np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2), x=rho1[0], axis=-1))
             res = outerint/norm - 1
