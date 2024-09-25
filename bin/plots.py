@@ -122,10 +122,11 @@ if __name__ == '__main__':
         
     if args.resampler == 'tophat':
         N1, N2 = deltaR1, deltaR2
-        k1vals = np.arange(0, np.round(10*norm))
         deltaR1, deltaR2 = N1/norm - 1, N2/norm - 1 # density constrast from number counts
         dedges = 1/norm
+        k1vals = np.arange(0, np.round(10*norm))
         edges = k1vals/norm - 1 - dedges/2 # bin edges
+        #edges = np.arange(-1, 10, 0.01)
     else:
         edges = np.arange(-1, 10, 0.01)
     deltavals = (edges[1:] + edges[:-1])/2 # bin centers
@@ -164,6 +165,8 @@ if __name__ == '__main__':
     if args.resampler=='tophat':
         ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + deltavals)*norm)
         ldtpdf1D = ldtmodel.density_pdf()
+        #ldtmodel.compute_ldt(sigma_noshotnoise)
+        #ldtpdf1D = ldtmodel.density_pdf(1+deltavals)
     else:
         ldtmodel.compute_ldt(sigma_noshotnoise)
         ldtpdf1D = ldtmodel.density_pdf(1+deltavals)
@@ -264,8 +267,8 @@ if __name__ == '__main__':
         if args.resampler == 'tophat':
             #d1edges = np.linspace(1, np.max(N10)+1, np.max(N10).astype('i4')+1)
             d1edges = k1vals/norm - 1 - dedges/2 
-            d2edges = k1vals/norm - 1 - dedges/2 
-            print(d1edges)
+            d2edges = k1vals/norm - 1 - dedges/2
+            #d1edges, d2edges = (np.arange(-1, 5, 0.03), np.arange(-1, 5, 0.03))
             #d1edges = d1edges/norm - 1 - dedges/2
             #d2edges = np.linspace(1, np.max(N20)+1, np.max(N20).astype('i4')+1)/norm - 1 - dedges/2
             #d1edges = d1edges[d1edges < 4]
@@ -291,9 +294,9 @@ if __name__ == '__main__':
         # LDT model
         ldtdsplitmodel = LDTDensitySplitModel(ldtmodel, density_bins=bins)
         if args.resampler=='tophat':
-            ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr))[0]
+            ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), 1 + d1[:, 0], 1 + d2[0, :])
         else:
-            ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), 1 + pos[..., 0], 1 + pos[..., 1])[0]
+            ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), 1 + d1[:, 0], 1 + d2[0, :])
         #print(ldtdsplitmodel.kvals/norm - 1)
         #print(pos[..., 0])
         #print(ldtmodelpdf2D.shape)
@@ -410,40 +413,22 @@ if __name__ == '__main__':
                                                           rsd=False, ells=ells)
 
         # LDT model
-        if False:
-            xvals = ldtdsplitmodel.xvals
-            print(xvals)
-            yvals = xvals[xvals < 8]
-            #rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
-            norm = nbar*v
-            d1edges = np.linspace(0, np.max(N10), np.max(N10).astype('i4')+1)/norm - 1 - 1/norm/2
-            d2edges = np.linspace(0, np.max(N20), np.max(N20).astype('i4')+1)/norm - 1 - 1/norm/2
-            d1edges = d1edges[d1edges<9]
-            d2edges = d2edges[d2edges<9]
-            print(d1edges)
-            d1, d2 = np.meshgrid((d1edges[1:] + d1edges[:-1])/2, (d2edges[1:] + d2edges[:-1])/2, indexing='ij')
-            print(d1)
-            print(d2)
+        try:
             rho1, rho2 = 1+d1, 1+d2
-
-            if args.resampler=='tophat':
-                ldt_pdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr))
-            else:
-                ldt_pdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), rho1, rho2)
+    
+            ldt_pdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), rho1, rho2)
     
             hist2D = np.histogram2d(deltaR1, deltaR2, bins=(d1edges, d2edges), density=True)[0]
-            mean_pdf1D = np.histogram(deltaR1, bins=d1edges, density=True)[0]
     
-            #ldt_pdf2D[:, :4] = hist2D[:, :4]
-            #ldt_pdf2D[:4, :] = hist2D[:4, :]
             plt.close()
             plt.imshow(np.abs(ldt_pdf2D-hist2D))
             plt.xlim(0, 50)
             plt.ylim(0, 50)
+            plt.colorbar()
             plt.savefig('testPDF2D.png')
             
-            ldtdsplitstest = ldtdsplitmodel.compute_dsplits_test(density_pdf=ldt_pdf1D, joint_density_pdf=ldt_pdf2D, x1=rho1-1, x2=rho2-1)
-        else:
+            ldtdsplitstest = ldtdsplitmodel.compute_dsplits_test(joint_density_pdf=hist2D, x1=d1, x2=d2)
+        except:
             ldtdsplitstest = None
         
         ldtdsplits = ldtdsplitmodel.compute_dsplits(xiR)
@@ -467,10 +452,11 @@ if __name__ == '__main__':
                         ax0.fill_between(s, s**2 * (ds_poles[ds][ill] - std[ds][ill]), s**2 * (ds_poles[ds][ill] + std[ds][ill]), facecolor=colors[ds], alpha=0.3)
                     
                     ds_poles_interp = np.interp(sep, s, ds_poles[ds][ill])
-                    if np.isnan(std):
-                        std_interp = np.nan 
-                    else:
+
+                    try:
                         std_interp = np.interp(sep, s, std[ds][ill])
+                    except:
+                        std_interp = np.nan 
                     
                     if model == 'gaussian':
                         ax0.plot(sep, sep**2 * gaussiandsplits[ds], color=colors[ds], ls=':')
