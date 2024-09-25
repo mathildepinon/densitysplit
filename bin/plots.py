@@ -80,7 +80,7 @@ if __name__ == '__main__':
             mock_density.compute_density(data=mock, cellsize=args.cellsize, resampler=args.resampler, smoothing_radius=args.smoothing_radius, cellsize2=args.cellsize2)
             #mock_density.save(f)
     else:
-        nmocks = 20
+        nmocks = 25
         mock_density = list()
         for i in range(nmocks):
             f = os.path.join(ds_dir, ds_name.format('ph0{:02d}'.format(i)))
@@ -122,14 +122,13 @@ if __name__ == '__main__':
         
     if args.resampler == 'tophat':
         N1, N2 = deltaR1, deltaR2
-        k1vals = np.arange(0, np.max(N1))
-        k2vals = np.arange(0, np.max(N2))
+        k1vals = np.arange(0, np.round(10*norm))
         deltaR1, deltaR2 = N1/norm - 1, N2/norm - 1 # density constrast from number counts
         dedges = 1/norm
-        edges = k1vals/norm - 1 - dedges/2 # bin centers
+        edges = k1vals/norm - 1 - dedges/2 # bin edges
     else:
-        edges, step = np.arange(-1, 10, 0.01), 0.01
-    deltavals = (edges[1:] + edges[:-1])/2
+        edges = np.arange(-1, 10, 0.01)
+    deltavals = (edges[1:] + edges[:-1])/2 # bin centers
 
     # Compute 1D PDF measured from mocks
     if args.imock is not None:
@@ -164,7 +163,7 @@ if __name__ == '__main__':
     ldtmodel.interpolate_sigma()
     if args.resampler=='tophat':
         ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + deltavals)*norm)
-        ldtpdf1D = ldtmodel.density_pdf()*norm
+        ldtpdf1D = ldtmodel.density_pdf()
     else:
         ldtmodel.compute_ldt(sigma_noshotnoise)
         ldtpdf1D = ldtmodel.density_pdf(1+deltavals)
@@ -172,7 +171,7 @@ if __name__ == '__main__':
     # Plot 1D PDF
     if True:
         density_name = sim_name + '_cellsize{:d}_resampler{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '')
-        mask = deltavals < 3
+        mask = deltavals < 3 # plot only up to delta = 3
         std_pdf1D = std_pdf1D[mask] if args.imock is None else std_pdf1D
         plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF.pdf'
         fig, axes = plt.subplots(2, 1, figsize = (4, 4), sharex=True, sharey='row', gridspec_kw={'height_ratios': [3, 1]})
@@ -188,13 +187,13 @@ if __name__ == '__main__':
                 axes[1].plot(deltavals[mask], (lognormalpdf1D[mask]-mean_pdf1D[mask]), alpha=0.5, color='C1')
             if args.show_ldt:
                 axes[1].plot(deltavals[mask], (ldtpdf1D[mask]-mean_pdf1D[mask]), color='C1')
-            axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R)$')
+            axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R)$')  
         else:
             if args.show_lognormal:
                 axes[1].plot(deltavals[mask], (lognormalpdf1D[mask]-mean_pdf1D[mask])/std_pdf1D, alpha=0.5, color='C1')
             if args.show_ldt:
                 axes[1].plot(deltavals[mask], (ldtpdf1D[mask]-mean_pdf1D[mask])/std_pdf1D, color='C1')
-            axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R) / \sigma$')            
+            axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R) / \sigma$')         
         axes[1].set_xlabel(r'$\delta_R$')
         axes[0].set_ylabel(r'$\mathcal{P}(\delta_R)$')
         #axes[0].set_xlim(-1, 3)
@@ -207,7 +206,10 @@ if __name__ == '__main__':
 
     # Plot bias function
     if True:
-        edges = edges[edges < 4]
+        if args.resampler=='tophat':
+            edges = edges[edges < 4][1:]
+        else:
+            edges = np.arange(-1, 4, 0.03)
         bias_func = list()
         for i in range(len(edges)-1):
             mask = (deltaR1 >= edges[i]) & (deltaR1 < edges[i+1])
@@ -215,8 +217,12 @@ if __name__ == '__main__':
             bias_func.append(bias)
         corr = np.mean(deltaR1*deltaR2, axis=-1)
         print(corr)
-        #corr = np.mean(deltaR1*deltaR2, axis=-1) - np.mean(deltaR1, axis=-1)*np.mean(deltaR2, axis=-1)
-        #print(corr)
+        #sep = np.linspace(0., 150., 51)
+        #xiR = mock_density.smoothed_corr(sep)
+        #if np.any(sep==args.sep):
+        #    corrtest = xiR[sep==args.sep]
+        #    corr = corrtest
+        #    print(corrtest)
         bias_func = np.array(bias_func) / corr
         #bias_func = np.array(bias2) / corr
         if args.imock is None:
@@ -256,16 +262,18 @@ if __name__ == '__main__':
         # Plot 2D PDF (onyl 1st mock)
         plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_s{:.0f}_2DPDF_contours.pdf'.format(args.sep)
         if args.resampler == 'tophat':
-            d1edges = np.linspace(2, np.max(N10)+1, np.max(N10).astype('i4'))
+            #d1edges = np.linspace(1, np.max(N10)+1, np.max(N10).astype('i4')+1)
+            d1edges = k1vals/norm - 1 - dedges/2 
+            d2edges = k1vals/norm - 1 - dedges/2 
             print(d1edges)
-            d1edges = d1edges/norm - 1 - dedges/2
-            d2edges = np.linspace(2, np.max(N20)+1, np.max(N20).astype('i4'))/norm - 1 - dedges/2
-            d1edges = d1edges[d1edges < 4]
-            d2edges = d2edges[d2edges < 4]
+            #d1edges = d1edges/norm - 1 - dedges/2
+            #d2edges = np.linspace(1, np.max(N20)+1, np.max(N20).astype('i4')+1)/norm - 1 - dedges/2
+            #d1edges = d1edges[d1edges < 4]
+            #d2edges = d2edges[d2edges < 4]
         else:
             d1edges, d2edges = (np.arange(-1, 5, 0.03), np.arange(-1, 5, 0.03))
-        d1, d2 = np.meshgrid((d1edges[1:] + d1edges[:-1])/2, (d2edges[1:] + d2edges[:-1])/2)
-        pos = np.dstack(np.meshgrid((d1edges[1:]+d1edges[:-1])/2, (d2edges[1:]+d2edges[:-1])/2))
+        d1, d2 = np.meshgrid((d1edges[1:] + d1edges[:-1])/2, (d2edges[1:] + d2edges[:-1])/2, indexing='ij')
+        pos = np.dstack(np.meshgrid((d1edges[1:]+d1edges[:-1])/2, (d2edges[1:]+d2edges[:-1])/2, indexing='ij'))
         hist2D, d1edges, d2edges = np.histogram2d(deltaR10, deltaR20, bins=(d1edges, d2edges), density=True)
 
         bins = mock_density.split_bins if args.imock is not None else mock_density[0].split_bins
@@ -276,17 +284,25 @@ if __name__ == '__main__':
         lognormaldsplitmodel.get_params_from_moments(sample=deltaR1.flatten())
         X, Y = np.log(1 + deltaR1/delta01) + sigma1**2/2, np.log(1 + deltaR2/delta02) + sigma2**2/2
         cov = np.cov(np.array([X.flatten(), Y.flatten()]))
+        #print(cov.shape)
         lognormalpdf2D = lognormaldsplitmodel.density2D(pos, sigma=sigma1, delta0=delta01, delta02=delta02, sigma2=sigma2, cov=cov)
+        #print(lognormalpdf2D.shape)
             
         # LDT model
         ldtdsplitmodel = LDTDensitySplitModel(ldtmodel, density_bins=bins)
-        ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(1 + pos[..., 0], 1 + pos[..., 1], corr)
+        if args.resampler=='tophat':
+            ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr))[0]
+        else:
+            ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), 1 + pos[..., 0], 1 + pos[..., 1])[0]
+        #print(ldtdsplitmodel.kvals/norm - 1)
+        #print(pos[..., 0])
+        #print(ldtmodelpdf2D.shape)
 
         # Lognormal space
         levels = [0.011, 0.135, 0.607]
         plt.figure(figsize=(4, 4))
         plt.plot([], [], label=r'$s = {:.0f} \; \mathrm{{Mpc}}/h$'.format(args.sep), alpha=0) # for legend
-        plt.contour(d1, d2, hist2D.T, levels=levels, colors='C0')
+        plt.contour(d1, d2, hist2D, levels=levels, colors='C0')
         if args.show_lognormal:
             plt.plot([], [], label='lognormal', color='C1', alpha=0.5) # for legend
             plt.contour(d1, d2, lognormalpdf2D, levels=levels, colors='C1', alpha=0.5)
@@ -303,8 +319,8 @@ if __name__ == '__main__':
         print('Saved 2D PDF contour plot: {}.'.format(os.path.join(plots_dir, plot_name)))
 
         # Plot 2D histogram
-        data_to_plot = {'mock': hist2D.T, 'lognormal': lognormalpdf2D, 'ldt': ldtmodelpdf2D}
-        vmax = max(np.max(np.abs(lognormalpdf2D - hist2D.T)), np.max(np.abs(ldtmodelpdf2D - hist2D.T)))
+        data_to_plot = {'mock': hist2D, 'lognormal': lognormalpdf2D, 'ldt': ldtmodelpdf2D}
+        vmax = max(np.max(np.abs(lognormalpdf2D - hist2D)), np.max(np.abs(ldtmodelpdf2D - hist2D)))
         from matplotlib import colors
         norm = colors.Normalize(vmin=0, vmax=vmax)
         for to_plot in ['mock', 'lognormal', 'ldt']:
@@ -313,7 +329,7 @@ if __name__ == '__main__':
             if to_plot=='mock':
                 image = plt.imshow(data_to_plot[to_plot], origin='lower', extent=(np.min(d1edges), np.max(d1edges), np.min(d2edges), np.max(d2edges)))
             else:
-                histdiff = np.abs(data_to_plot[to_plot] - hist2D.T)
+                histdiff = np.abs(data_to_plot[to_plot] - hist2D)
                 image = plt.imshow(histdiff, origin='lower', extent=(np.min(d1edges), np.max(d1edges), np.min(d2edges), np.max(d2edges)), norm=norm)
             plt.plot([], [], label=r'$s = {:.0f} \; \mathrm{{Mpc}}/h$'.format(args.sep), alpha=0) # for legend
             plt.xlabel(r'$\delta_{R}(r)$')
@@ -363,22 +379,17 @@ if __name__ == '__main__':
             ds_corr = [mock_density.ds_data_corr]
             if args.resampler=='tophat':
                 xiR = mock_density.smoothed_corr(sep)
-                ds_poles = [np.ravel(res.get_corr(return_sep=False)) for res in ds_corr[0]]
-                std = np.nan
-                s, _ = ds_corr[0][0].get_corr(return_sep=True)
             else:
                 xiR = np.mean(mock_density.smoothed_corr(sep), axis=1)
-                ds_poles, cov = get_split_poles(ds_corr, ells=ells, nsplits=args.nsplits)
-                std = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, nells)), args.nsplits, axis=1)
-                s, _, _ = ds_corr[0][0].get_corr(return_sep=True)
         else:
             ds_corr = np.array([mock_density[i].ds_data_corr for i in range(nmocks)])
             if args.resampler=='tophat':
-                xiR = np.mean(np.array([np.mean(mock_density[i].smoothed_corr(sep), axis=1) for i in range(nmocks)]), axis=0)
-            else:
                 xiR = np.mean(np.array([mock_density[i].smoothed_corr(sep) for i in range(nmocks)]), axis=0)
-        #ds_poles, cov = get_split_poles(ds_corr, ells=ells, nsplits=args.nsplits)
-        #std = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, nells)), args.nsplits, axis=1)
+            else:
+                xiR = np.mean(np.array([np.mean(mock_density[i].smoothed_corr(sep), axis=1) for i in range(nmocks)]), axis=0)
+        ds_poles, cov = get_split_poles(ds_corr, ells=None if args.resampler=='tophat' else ells)
+        std = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, nells)), args.nsplits, axis=1)
+        s = ds_corr[0][0].get_corr(return_sep=True)[0].ravel()
 
         # Gaussian model
         print('Computing Gaussian density split model.')
@@ -388,7 +399,8 @@ if __name__ == '__main__':
             del2 = bins[i+1]
             ds_mask = (deltaR1 >= del1) & (deltaR1 < del2)
             deltaRds.append(np.mean(deltaR1[ds_mask]))
-        gaussiandsplits = np.array(deltaRds)[:, None] * xiR[None, :] / np.var(deltaRds)
+        print(np.array(deltaRds).shape)
+        gaussiandsplits = np.array(deltaRds)[:, None] * xiR[None, :] / sigma**2
 
         # Lognormal model
         print('Computing lognormal density split model.')
@@ -398,10 +410,45 @@ if __name__ == '__main__':
                                                           rsd=False, ells=ells)
 
         # LDT model
-        #ldtdsplits = ldtdsplitmodel.compute_dsplits_test(density_pdf=mean_pdf1D, joint_density_pdf=hist2D.T, x1=d1, x2=d2)
+        if False:
+            xvals = ldtdsplitmodel.xvals
+            print(xvals)
+            yvals = xvals[xvals < 8]
+            #rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
+            norm = nbar*v
+            d1edges = np.linspace(0, np.max(N10), np.max(N10).astype('i4')+1)/norm - 1 - 1/norm/2
+            d2edges = np.linspace(0, np.max(N20), np.max(N20).astype('i4')+1)/norm - 1 - 1/norm/2
+            d1edges = d1edges[d1edges<9]
+            d2edges = d2edges[d2edges<9]
+            print(d1edges)
+            d1, d2 = np.meshgrid((d1edges[1:] + d1edges[:-1])/2, (d2edges[1:] + d2edges[:-1])/2, indexing='ij')
+            print(d1)
+            print(d2)
+            rho1, rho2 = 1+d1, 1+d2
+
+            if args.resampler=='tophat':
+                ldt_pdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr))
+            else:
+                ldt_pdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(corr), rho1, rho2)
+    
+            hist2D = np.histogram2d(deltaR1, deltaR2, bins=(d1edges, d2edges), density=True)[0]
+            mean_pdf1D = np.histogram(deltaR1, bins=d1edges, density=True)[0]
+    
+            #ldt_pdf2D[:, :4] = hist2D[:, :4]
+            #ldt_pdf2D[:4, :] = hist2D[:4, :]
+            plt.close()
+            plt.imshow(np.abs(ldt_pdf2D-hist2D))
+            plt.xlim(0, 50)
+            plt.ylim(0, 50)
+            plt.savefig('testPDF2D.png')
+            
+            ldtdsplitstest = ldtdsplitmodel.compute_dsplits_test(density_pdf=ldt_pdf1D, joint_density_pdf=ldt_pdf2D, x1=rho1-1, x2=rho2-1)
+        else:
+            ldtdsplitstest = None
+        
         ldtdsplits = ldtdsplitmodel.compute_dsplits(xiR)
         
-        for model in ['lognormal', 'ldt']:
+        for model in ['lognormal', 'ldt', 'gaussian']:
             plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_densitysplits_{}model.pdf'.format(model)
             figsize = (8, 4) if args.rsd else (4, 4)
             fig, axes = plt.subplots(2, nells, figsize=figsize, sharex=True, sharey='row', gridspec_kw={'height_ratios': [3, 1]})
@@ -413,17 +460,29 @@ if __name__ == '__main__':
         
                 for ds in range(args.nsplits):
                     if args.resampler=='tophat':
-                        ax0.plot(s, s**2 * ds_poles[ds], color=colors[ds], label=r'DS{} $\times$ all'.format(ds))
+                        ax0.plot(s, s**2 * ds_poles[ds].ravel(), color=colors[ds], label=r'DS{} $\times$ all'.format(ds))
                     else:
                         ax0.plot(s, s**2 * ds_poles[ds][ill], color=colors[ds], label=r'DS{} $\times$ all'.format(ds))                        
-                    #ax0.plot(sep, sep**2 * gaussiandsplits[ds], color=colors[ds], ls='-', alpha=0.4)
                     if args.imock is None:
                         ax0.fill_between(s, s**2 * (ds_poles[ds][ill] - std[ds][ill]), s**2 * (ds_poles[ds][ill] + std[ds][ill]), facecolor=colors[ds], alpha=0.3)
+                    
+                    ds_poles_interp = np.interp(sep, s, ds_poles[ds][ill])
+                    if np.isnan(std):
+                        std_interp = np.nan 
+                    else:
+                        std_interp = np.interp(sep, s, std[ds][ill])
+                    
+                    if model == 'gaussian':
+                        ax0.plot(sep, sep**2 * gaussiandsplits[ds], color=colors[ds], ls=':')
+                        ax1.plot(sep, (gaussiandsplits[ds] - ds_poles_interp)/std_interp, color=colors[ds], ls=':')
                     if model == 'lognormal':
                         ax0.plot(sep, sep**2 * lognormaldsplits[ds], color=colors[ds], ls=':')
+                        ax1.plot(sep, (lognormaldsplits[ds] - ds_poles_interp)/std_interp, color=colors[ds], ls=':')
                     if model == 'ldt':
                         ax0.plot(sep, sep**2 * ldtdsplits[ds], color=colors[ds], ls=':')
-                        #ax0.scatter(args.sep, args.sep**2 * ldtdsplits[ds], color=colors[ds])
+                        ax1.plot(sep, (ldtdsplits[ds] - ds_poles_interp)/std_interp, color=colors[ds], ls=':')
+                        if ldtdsplitstest is not None:
+                            ax0.scatter(args.sep, args.sep**2 * ldtdsplitstest[ds], color=colors[ds])
                         
                     #split_xi_interp = np.interp(sep, s, split_xi[ds][ill])
                     #std_interp = np.interp(sep, s, std[ds][ill])
