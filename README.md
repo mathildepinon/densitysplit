@@ -1,6 +1,6 @@
 # densitysplit
 
-Best package ever.
+Package for computing density-split correlation functions from galaxy catalogs, as well as theoretical predictions based on the lognormal approximation or the Large Deviation Theory framework.
 
 ## Requirements
 
