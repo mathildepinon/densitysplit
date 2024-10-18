@@ -13,33 +13,8 @@ from pycorr import TwoPointCorrelationFunction, setup_logging
 from . import catalog_data
 from . import utils
 from .utils import BaseClass, mkdir
+from densitysplit.corr_func_utils import get_poles, get_split_poles
 from densitysplit.cic_density import compute_cic_density
-
-
-# obsolete
-def sample_splits(density_mesh, resampler, split_bins, size, boxsize, offset, cellsize, seed=42):
-    rng = np.random.RandomState(seed=seed)
-    positions = [o + rng.uniform(0., 1., size)*b for o, b in zip((offset,)*3, (boxsize,)*3)]
-    shifted_positions = np.array(positions) - offset
-    densities = density_mesh.readout(shifted_positions.T, resampler=resampler)
-
-    split_samples = list()
-
-    nsplits = len(split_bins)-1
-
-    for i in range(nsplits):
-        split_min = split_bins[i]
-        split_max = split_bins[i+1]
-        if i == 0:
-            split = (densities <= split_max)
-        elif i == nsplits-1:
-            split = (densities > split_min)
-        else:
-            split = np.logical_and((densities > split_min), (densities <= split_max))
-
-        split_samples.append(np.array(positions).T[split].T)
-
-    return split_samples
 
 
 class DensitySplit(BaseClass):
@@ -196,11 +171,11 @@ class DensitySplit(BaseClass):
             split_min = bins[i]
             split_max = bins[i+1]
             if i == 0:
-                split_mesh[self.density_mesh <= split_max] = 1
+                split_mesh[self.density_mesh < split_max] = 1
             elif i == nsplits-1:
-                split_mesh[self.density_mesh > split_min] = nsplits
+                split_mesh[self.density_mesh >= split_min] = nsplits
             else:
-                split_mesh[np.logical_and(self.density_mesh > split_min, self.density_mesh <= split_max)] = i+1
+                split_mesh[np.logical_and(self.density_mesh >= split_min, self.density_mesh < split_max)] = i+1
 
             if hasattr(self, 'data_densities') and self.data_densities is not None: # if resampler is not 'tophat'
                 indices = (splits == i+1)
@@ -217,8 +192,11 @@ class DensitySplit(BaseClass):
     #    split_samples = sample_splits(self.density_mesh, self.resampler_conversions[self.resampler], self.split_bins, size, self.boxsize, self.offset, self.cellsize, seed=seed)
     #    return split_samples
 
-    def sample_splits(self, positions, size=None, seed=42):
+    def sample_splits(self, positions, size=None, seed=42, norm=None):
         densities, positions = self.readout_density(positions=positions, size=size, resampler=self.resampler, return_positions=True)
+
+        if self.resampler=='tophat':
+            densities = densities / norm - 1
     
         split_samples = list()
     
@@ -228,21 +206,22 @@ class DensitySplit(BaseClass):
             split_min = self.split_bins[i]
             split_max = self.split_bins[i+1]
             if i == 0:
-                split = (densities <= split_max)
+                split = (densities < split_max)
             elif i == nsplits-1:
-                split = (densities > split_min)
+                split = (densities >= split_min)
             else:
-                split = np.logical_and((densities > split_min), (densities <= split_max))
+                split = np.logical_and((densities >= split_min), (densities < split_max))
     
-            split_samples.append(np.array(positions).T[split].T)
+            split_samples.append(np.array(positions)[..., split])
     
         return split_samples
 
-
+    
     def compute_smoothed_corr(self, edges, positions2=None, weights2=None, seed=0, los='x', nthreads=128, norm=None, mode='smu'):
 
         if self.resampler=='tophat':
             densities, positions1 = self.readout_density(positions='mesh', resampler=self.resampler, return_positions=True)
+            #positions1 = positions1 - self.offset
             densities = densities / norm - 1
         else:
             ## Generate random particles and readout density at each particle
@@ -272,20 +251,21 @@ class DensitySplit(BaseClass):
                     densities2 = self.readout_density(shifted_positions1.T, resampler=self.resampler, mesh=2)
                 weights2 = 1 + densities2
 
-        #print('positions1: ', positions1)
-        #print('positions2: ', positions2)
-        #print(np.array(positions1).shape)
-        #print('weights1: ', weights1)
-        #print('weights2: ', weights2)
-        #import sys
-        #sys.exit()
-    
+        #rng = np.random.RandomState(seed=42)
+        #mask = rng.uniform(0., 1., positions1.shape[-1]) < 0.1
+
         smoothed_corr = TwoPointCorrelationFunction(mode, edges,
                                             data_positions1=positions1, data_positions2=positions2,
                                             data_weights1=weights1, data_weights2=weights2,
-                                            boxsize=self.boxsize,
+                                            #randoms_positions1=positions1, 
+                                            estimator='natural', boxsize=self.boxsize,
                                             engine='corrfunc', nthreads=nthreads,
                                             los=los)
+
+        # when positions are mesh positions, need to specify mesh positions as randoms
+        if self.resampler=='tophat':
+            smoothed_corr.R1R2.wcounts[...] = smoothed_corr.D1D2.ncounts[...]
+            smoothed_corr.R1R2.wnorm = positions1.shape[1]*(positions1.shape[1]-1)
 
         self.smoothed_corr = smoothed_corr
         
@@ -306,8 +286,7 @@ class DensitySplit(BaseClass):
             if self.resampler=='tophat':
                 densities, positions2 = self.readout_density(positions='mesh', resampler=self.resampler, return_positions=True)
                 densities = densities / norm - 1 
-                split_samples = self.sample_splits(positions='mesh')
-
+                split_samples = self.sample_splits(positions='mesh', norm=norm)
             else:
                 rng = np.random.RandomState(seed=seed)
                 positions2 = [o + rng.uniform(0., 1., self.size)*b for o, b in zip((self.offset,)*3, (self.boxsize,)*3)]
@@ -320,21 +299,69 @@ class DensitySplit(BaseClass):
         
         weights = 1 + densities    
         densitysplits = list()
+
+        #rng = np.random.RandomState(seed=42)
+
+        R1R2 = None
     
         self.logger.info('Compute density splits.')
         for i in range(self.nsplits):
             self.logger.info('Density split {}'.format(i))
+            #maski = rng.uniform(0., 1., split_samples[i].shape[-1]) < 0.1
+            #mask = rng.uniform(0., 1., positions2.shape[-1]) < 0.1
+            
             dsplit = TwoPointCorrelationFunction(mode, edges,
                                                     data_positions1=split_samples[i], data_positions2=positions2,
                                                     data_weights1=None, data_weights2=weights,
+                                                    randoms_positions1=positions2, randoms_positions2=positions2,
+                                                    R1R2=R1R2,
                                                     boxsize=self.boxsize,
                                                     engine='corrfunc', nthreads=nthreads,
                                                     los=los)
+
+            R1R2 = dsplit.R1R2
+
             densitysplits.append(dsplit)
     
         self.ds_data_corr = densitysplits
         
         return densitysplits
+
+
+    def compute_biasfunction(self, deltabins, smul=1, norm=1, return_corr=False):
+        mesh_indices = np.array([np.indices(self.density_mesh.value.shape)[i].ravel() for i in range(3)])
+
+        new_indices = mesh_indices.copy()
+        nmesh = np.int32(self.boxsize/self.cellsize)
+
+        delta_R1 = self.density_mesh.value / norm - 1
+
+        delta_R2 = list()
+
+        for i in range(3):
+            new_indices[i] = (new_indices[i] + smul) % nmesh
+            tmp = delta_R1[new_indices[0], new_indices[1], new_indices[2]].ravel()
+            delta_R2.append(tmp)
+
+        delta_R2 = np.array(delta_R2)
+        delta_R1 = delta_R1.ravel()
+
+        bias_func = list()
+
+        for i in range(len(deltabins)-1):
+            mask = (delta_R1 >= deltabins[i]) & (delta_R1 < deltabins[i+1])
+            delta_R2_masked = delta_R2[:, mask]
+            n1 = np.sum(mask)
+            bias = np.sum(delta_R2_masked) / (3*n1)
+            bias_func.append(bias)
+
+        mean_delta_R2 = np.mean(delta_R2, axis=0)
+        corr = np.mean(delta_R1*mean_delta_R2)
+
+        if return_corr:
+            return np.array(bias_func) / corr, corr
+        else:
+            return np.array(bias_func) / corr
 
     
     def compute_jointpdf_delta_R1_R2(self, s=None, sbin=None, query_positions='randoms', sample_size=None, mu=None, los='x', seed=0, split=None, norm=None):      
@@ -545,7 +572,7 @@ class DensitySplit(BaseClass):
     def __getstate__(self, save_density_mesh=True):
         state = {}
         for name in ['boxsize', 'boxcenter', 'offset', 'size',
-                     'cellsize', 'cellsize2', 'resampler', 'data_densities',
+                     'cellsize', 'cellsize2', 'resampler', 'smoothing_radius', 'smoothing_radius2', 'data_densities',
                      'nsplits', 'split_bins', 'split_labels',
                      'smoothed_corr', 'ds_data_corr']:
             if hasattr(self, name):
@@ -635,5 +662,155 @@ class TopHat(object):
             w = 3 * (np.sin(kr) / kr ** 3 - np.cos(kr) / kr ** 2)
         w[k == 0] = 1.0
         return w * v
+
+
+class CountInCellsDensitySplitMeasurement(BaseClass):
+    """
+    Class DensitySplitMeasurement, to store a colleciton of density-split measurements.
+    """
+    def __init__(self, densitysplits, mesh_fn=None):
+        self.logger = logging.getLogger('CountInCellsDensitySplitMeasurement')
+        self.logger.info('Initializing CountInCellsDensitySplitMeasurement')
+
+        mocks = list()
+        densitysplits = list(densitysplits)
+        for i, mock_fn in enumerate(densitysplits):
+            if isinstance(mock_fn, str):
+                if os.path.isfile(mock_fn):
+                    if mesh_fn is not None:
+                        mock = DensitySplit.load(mock_fn, mesh_filename=mesh_fn[i])
+                    else:
+                        mock = DensitySplit.load(mock_fn)
+                    mocks.append(mock)
+                else:
+                    self.logger.warning('File {} not found, ignoring this file.'.format(mock_fn))
+            else:
+                mocks.append(mock_fn)
+
+        self.mocks = mocks
+        self.nmocks = len(mocks)
+        self.logger.info('Loaded {} mocks.'.format(self.nmocks))
+        
+        self.nbar_all = np.array([mocks[i].size/mocks[i].boxsize**3 for i in range(self.nmocks)])
+        self.nbar = np.mean(self.nbar_all)
+        self.smoothing_radius = np.array([mocks[i].smoothing_radius for i in range(self.nmocks)])
+        if len(set(self.smoothing_radius)) == 1:
+            self.smoothing_radius = self.smoothing_radius[0]
+        else:
+            self.logger.warning('Smoothing radius is not the same for all mocks!')
+        self.norm_all = self.nbar_all * 4/3 * np.pi * self.smoothing_radius**3
+        self.norm = np.mean(self.norm_all)
+
+        self.cellsize = np.array([self.mocks[i].cellsize for i in range(self.nmocks)])
+        if len(set(self.cellsize)) == 1:
+            self.cellsize  = self.cellsize[0]
+        else:
+            self.logger.warning('Cell size is not the same for all mocks!')
+
+        self.kvals = np.arange(0, np.round(10*self.norm))
+        self.dedges = 1/self.norm
+        self.edges = self.kvals/self.norm - 1 - self.dedges/2
+        self.deltavals = (self.edges[1:] + self.edges[:-1])/2
+
+        self.bias_function_x = dict()
+        self.bias_function = dict()
+        self.bias_corr = dict()
+
+        self.hist2D_x = dict()
+        self.hist2D = dict()
+
+        bins = list()
+        for i, mock in enumerate(self.mocks):
+            if hasattr(mock, 'split_bins'):
+                bins.append(mock.split_bins)
+            else:
+                bins.append(None)
+        self.bins = np.array(bins)
+        if not np.all(np.all(self.bins == self.bins[0], axis=1)):
+            self.logger.warning('Density split bins are not equal for all mocks!')
+        self.bins = np.mean(self.bins, axis=0)
+        self.logger.info('Taking average bins: {}'.format(self.bins))
+        self.nsplits = len(self.bins) - 1
+
+    def set_pdf1D(self, xlim=None, rebin=None):
+        N_R = np.array([self.mocks[i].density_mesh.value for i in range(self.nmocks)])
+        delta_R = N_R / self.norm - 1
+        self.avg_all = np.mean(delta_R, axis=1)
+        self.avg = np.mean(delta_R.flatten())
+        self.sigma_all = np.std(delta_R, axis=1)
+        self.sigma = np.std(delta_R.flatten())
+        self.delta3_all = np.mean(delta_R**3, axis=1)
+        self.delta3 = np.mean(delta_R.flatten()**3)
+        edges = self.edges
+        if rebin is not None:
+            edges = edges[::rebin]
+        if xlim is not None:
+            mask = (edges >= xlim[0]) & (edges <= xlim[1])
+            edges = edges[mask]
+        self.pdf1D_x = (edges[1:] + edges[:-1])/2
+        self.pdf1D = np.array([np.histogram(delta_R[i], bins=edges, density=True)[0] for i in range(self.nmocks)])
+
+    def set_bias_function(self, sep, xlim=None, rebin=None):
+        edges = self.edges
+        if rebin is not None:
+            edges = edges[::rebin]
+        if xlim is not None:
+            mask = (edges >= xlim[0]) & (edges <= xlim[1])
+            edges = edges[mask]
+        self.bias_function_x[str(sep)] = (edges[1:] + edges[:-1])/2
+        corr = list()
+        bias_function = list()
+        for i in range(self.nmocks):               
+            tmp = self.mocks[i].compute_biasfunction(deltabins=edges, smul=sep//self.cellsize, norm=self.norm, return_corr=True)
+            bias_function.append(tmp[0])
+            corr.append(tmp[1])
+        self.bias_corr[str(sep)] = np.array(corr)
+        self.bias_function[str(sep)] = np.array(bias_function)
+
+    def set_pdf2D(self, sep, swidth, xlim=None, rebin=None):
+        N_R = [self.mocks[i].compute_jointpdf_delta_R1_R2(s=sep, sbin=(sep-swidth, sep+swidth), query_positions='mesh') for i in range(self.nmocks)]
+        N1_R = np.array([N_R[i][0] for i in range(self.nmocks)])
+        N2_R = np.array([N_R[i][1] for i in range(self.nmocks)])
+        delta_R1 = N1_R / self.norm - 1
+        delta_R2 = N2_R / self.norm - 1
+        edges = self.edges
+        if rebin is not None:
+            edges = edges[::rebin]
+        if xlim is not None:
+            mask = (edges >= xlim[0]) & (edges <= xlim[1])
+            edges = edges[mask]
+        hist2D = list()
+        for i in range(self.nmocks):
+            hist2D.append(np.histogram2d(delta_R1[i], delta_R2[i], bins=(edges, edges), density=True)[0])
+        self.hist2D[str(sep)] = np.array(hist2D)
+        self.hist2D_x[str(sep)] = edges
+
+    def set_densitysplits(self):
+        ds_corr = np.array([self.mocks[i].ds_data_corr for i in range(self.nmocks)])
+        ds_poles, cov = get_split_poles(ds_corr, ells=None)
+        std = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, 1)), self.nsplits, axis=1)
+        self.sep = ds_corr[0][0].get_corr(return_sep=True)[0].ravel()
+        self.smoothed_corr = np.array([self.mocks[i].smoothed_corr(self.sep) for i in range(self.nmocks)])
+        self.ds_corr = ds_poles
+
+        # Gaussian approximation
+        N_R = np.array([self.mocks[i].density_mesh.value for i in range(self.nmocks)])
+        delta_R = N_R / self.norm - 1
+
+        #deltaRds = list()
+        #for i in range(len(self.bins)-1):
+        #    del1 = max(self.bins[i], -1)
+        #    del2 = self.bins[i+1]
+        #    ds_mask = (delta_R >= del1) & (delta_R < del2)
+        #    deltaRds.append(np.mean(delta_R[ds_mask]))
+        #self.gaussian_ds_corr = np.array(deltaRds)[:, None] * self.smoothed_corr[None, :] / self.sigma**2
+
+    def __getstate__(self):
+        state = {}
+        for name in self.__dict__.keys():
+            if (name != 'mocks') & (name != 'logger'): # don't save all data, don't save logger
+                state[name] = getattr(self, name)
+        return state
+
 
 
