@@ -681,6 +681,8 @@ class CountInCellsDensitySplitMeasurement(BaseClass):
                         mock = DensitySplit.load(mock_fn, mesh_filename=mesh_fn[i])
                     else:
                         mock = DensitySplit.load(mock_fn)
+                        #mock.smoothing_radius = 25
+                        #mock.save(mock_fn)
                     mocks.append(mock)
                 else:
                     self.logger.warning('File {} not found, ignoring this file.'.format(mock_fn))
@@ -787,15 +789,15 @@ class CountInCellsDensitySplitMeasurement(BaseClass):
 
     def set_densitysplits(self):
         ds_corr = np.array([self.mocks[i].ds_data_corr for i in range(self.nmocks)])
-        ds_poles, cov = get_split_poles(ds_corr, ells=None)
-        std = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, 1)), self.nsplits, axis=1)
+        #ds_poles, cov = get_split_poles(ds_corr, ells=None)
+        #std = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, 1)), self.nsplits, axis=1)
         self.sep = ds_corr[0][0].get_corr(return_sep=True)[0].ravel()
         self.smoothed_corr = np.array([self.mocks[i].smoothed_corr(self.sep) for i in range(self.nmocks)])
-        self.ds_corr = ds_poles
+        self.ds_corr = ds_corr
 
         # Gaussian approximation
-        N_R = np.array([self.mocks[i].density_mesh.value for i in range(self.nmocks)])
-        delta_R = N_R / self.norm - 1
+        #N_R = np.array([self.mocks[i].density_mesh.value for i in range(self.nmocks)])
+        #delta_R = N_R / self.norm - 1
 
         #deltaRds = list()
         #for i in range(len(self.bins)-1):
