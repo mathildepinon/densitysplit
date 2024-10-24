@@ -8,7 +8,7 @@ from functools import reduce
 from scipy.integrate import quad
 from scipy.optimize import fsolve
 from scipy.interpolate import interp1d
-from scipy.special import factorial
+from scipy.special import factorial, loggamma
 
 from pycorr import setup_logging
 from .utils import BaseClass
@@ -122,7 +122,7 @@ class LDT(BaseClass):
         if tab_fn is not None and os.path.isfile(tab_fn):
             Rvals, sigmavals = np.load(tab_fn)
         else:
-            logRvals = np.arange(np.log(0.01**(1/3)), np.log(10**(1 + 1/3 + 1)), 0.2)
+            logRvals = np.arange(np.log(0.01**(1/3)), np.log(10**(1 + 1/3 + 1)), 0.1)
             #logRvals = np.arange(-10, np.log(10**(1 + 1/3 + 1)), 0.1)
             self.logger.info('Interpolating sigma for {} R log-spaced values between {} and {}'.format(len(logRvals), np.min(logRvals), np.max(logRvals)))
             Rvals = np.exp(logRvals)
@@ -183,7 +183,8 @@ class LDT(BaseClass):
             density_pdfvals = self.density_pdf_noshotnoise(x)
             norm = self.norm
             def func(N):
-                poisson_pdf = (norm * x[:, None])**N * np.exp(-norm * x[:, None]) / factorial(N)
+                log_poisson_pdf = N * np.log(norm * x[:, None]) - (norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
+                poisson_pdf = np.exp(log_poisson_pdf)
                 res = np.trapz(poisson_pdf * density_pdfvals[:, None], x=x, axis=0)
                 return res
             if (k is None) and (rho is not None):
@@ -206,34 +207,54 @@ class LDT(BaseClass):
             mask = self.yvals < ymax
             x = self.yvals[mask]
             self.xvals = x
-            self.density_pdfvals = self.density_pdf(x)
+            self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
         else:
             x = self.kvals/self.norm
             mask = (x>=np.min(self.yvals)) & (x<ymax)
             x = x[mask]
             self.xvals = x
-            self.density_pdfvals = self.density_pdf(k=self.kvals[mask])
+            self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
         lowrhobias = self.lowrhobias(x)
         self.low_rho_bias = lowrhobias
-        if self.kvals is None:
-            self.exp_bias_norm = np.trapz(lowrhobias * self.density_pdfvals, x=x)
-        else:
-            self.exp_bias_norm = np.sum(lowrhobias * self.density_pdfvals)/self.norm
+        self.exp_bias_norm = np.trapz(lowrhobias * self.density_pdfvals_noshotnoise, x=x)
         return self.exp_bias_norm
     
     def exprhobiasnorm(self):
-        integrand = self.xvals * (self.low_rho_bias - self.exp_bias_norm) * self.density_pdfvals
+        integrand = self.xvals * (self.low_rho_bias - self.exp_bias_norm) * self.density_pdfvals_noshotnoise
         if self.kvals is None:
             return np.trapz(integrand, x=self.xvals)
         else:
             return np.sum(integrand)/self.norm
     
     # bias function
-    def bias(self, rho):
+    def bias_noshotnoise(self, rho):
         rho_bias_norm = self.exprhobiasnorm()
         res = (self.lowrhobias(rho) - self.exp_bias_norm)  / rho_bias_norm
         return res
 
+    # bias function convolved with Poisson shot noise
+    def bias(self, rho=None):
+        ymax = 9
+        mask = self.yvals < ymax
+        x = self.yvals[mask]
+        norm = self.norm
+        bias_func = self.bias_noshotnoise(x)
+        density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
+        test = bias_func*density_pdfvals_noshotnoise
+        density_pdfvals = self.density_pdf(rho=rho)        
+        def func(N):
+            log_poisson_pdf = N * np.log(norm * x[:, None]) - (norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
+            poisson_pdf = np.exp(log_poisson_pdf)
+            res = np.trapz(poisson_pdf * test[:, None], x=x, axis=0)
+            return res
+        if (self.kvals is None) and (rho is not None):
+            k = np.round(norm * rho)
+            k = np.append(k, np.max(k)+1)
+            return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm / density_pdfvals
+        else:
+            k=self.kvals
+            return func(k) * norm / density_pdfvals
+            
 
 class LDTDensitySplitModel(LDT):
     """
@@ -271,14 +292,12 @@ class LDTDensitySplitModel(LDT):
             k1, k2 = np.meshgrid(self.kvals, self.kvals, indexing='ij')
             rho1, rho2 = self.kvals/self.norm, self.kvals/self.norm
             res = self.joint_density_pdf_nonorm(xi)
+            norm = np.sum(np.sum(res, axis=-1), axis=-1)/self.norm**2
+            avg = np.sum(np.sum(rho2*res, axis=-1), axis=-1)/self.norm**2
         else:
             res = self.joint_density_pdf_nonorm(xi, rho1, rho2)
-        #rho1, rho2 = np.meshgrid(rho1, rho2, indexing='ij')
-        # renormalize
-        norm = np.trapz(np.trapz(res, x=rho2, axis=-1), x=rho1, axis=-1)
-        #print('norm: ', norm)
-        avg = np.trapz(np.trapz(rho2*res, x=rho2, axis=-1), x=rho1, axis=-1)
-        #print('avg: ', avg)
+            norm = np.trapz(np.trapz(res, x=rho2, axis=-1), x=rho1, axis=-1)
+            avg = np.trapz(np.trapz(rho2*res, x=rho2, axis=-1), x=rho1, axis=-1)
         beta = avg/norm
         alpha = avg**2 / norm**3
         alpha = alpha[..., None, None]
@@ -303,9 +322,10 @@ class LDTDensitySplitModel(LDT):
         rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
         if self.kvals is not None:
             density_pdf_2D = self.joint_density_pdf(xi)
+            innerint = np.sum(rho2 * density_pdf_2D, axis=-1)/self.norm
         else:
             density_pdf_2D = self.joint_density_pdf(xi, rho1=rho1[:, 0], rho2=rho2[0, :])
-        innerint = np.trapz(rho2 * density_pdf_2D, x=yvals, axis=-1)
+            innerint = np.trapz(rho2 * density_pdf_2D, x=yvals, axis=-1)
         dsplits = list()
         for i in range(len(self.density_bins)-1):
             d1 = max(self.density_bins[i], -1)
@@ -313,8 +333,12 @@ class LDTDensitySplitModel(LDT):
             self.logger.info('Computing LDT density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
             t0 = time.time()
             ds_mask = (rho1[:, 0] >= 1 + d1) & (rho1[:, 0] < 1 + d2)
-            outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
-            norm =  np.trapz(np.trapz(density_pdf_2D, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+            if self.kvals is not None:
+                outerint = np.sum(innerint[..., ds_mask], axis=-1)/self.norm
+                norm =  np.sum(np.sum(density_pdf_2D, axis=-1)[..., ds_mask], axis=-1)/self.norm**2
+            else:
+                outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+                norm =  np.trapz(np.trapz(density_pdf_2D, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
             #norm = np.trapz(self.density_pdf(rho1[:, 0][ds_mask]), x=rho1[:, 0][ds_mask])
             #print(norm)
             res = outerint/norm - 1

@@ -4,7 +4,7 @@ import argparse
 import pickle
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from scipy.optimize import minimize, curve_fit
 
 from densitysplit.corr_func_utils import get_split_poles
@@ -34,15 +34,16 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, data_style=None,
     axes[0].plot(x, mean_pdf1D, label=data_label, **data_style)
     axes[0].fill_between(x, mean_pdf1D - std_pdf1D, mean_pdf1D + std_pdf1D, facecolor=data_style['color'], alpha=0.3)
     axes[1].fill_between(x, -std_pdf1D, std_pdf1D, facecolor=data_style['color'], alpha=0.3)
-    
-    for m in models.keys():
-        if rebin is not None:
-            models[m] = models[m][::rebin]
-        if xlim is not None:
-            models[m] = models[m][mask]
-            
-        axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m])
-        axes[1].plot(x, (models[m] - mean_pdf1D), **model_styles[m])
+
+    if models is not None:
+        for m in models.keys():
+            if rebin is not None:
+                models[m] = models[m][::rebin]
+            if xlim is not None:
+                models[m] = models[m][mask]
+                
+            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m])
+            axes[1].plot(x, (models[m] - mean_pdf1D), **model_styles[m])
 
     axes[1].ticklabel_format(style='sci', scilimits=(-3, 3))
     axes[1].set_xlabel(r'$\delta_R$')
@@ -99,6 +100,48 @@ def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style
     plt.savefig(fn, dpi=500)
     plt.close()
     print('Plot saved at {}'.format(fn))
+
+
+def plot_pdf2D(x, mean_hist, std_hist, plot='mean_hist', cbar_label=None, xlim=None, vmax=None, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, sep=None, fn=None):
+    to_plot = {'mean_hist': mean_hist, 'std_hist': std_hist}
+    if models is not None:
+        for model in models.keys():
+            to_plot[model] = models[model]
+
+    plt.figure(figsize=(3, 3))
+
+    if plot in ['mean_hist', 'std_hist']:
+        if vmax is not None:
+            norm = Normalize(vmin=0, vmax=vmax)
+        else:
+            norm = None
+        image = plt.imshow(to_plot[plot], origin='lower', extent=(np.min(x), np.max(x), np.min(x), np.max(x)), norm=norm)
+    else:
+        if vmax is None:
+            vmax = np.nanmax(np.abs(to_plot[plot] - mean_hist))
+        norm = Normalize(vmin=0, vmax=vmax)
+        image = plt.imshow(np.abs(to_plot[plot] - mean_hist), origin='lower', extent=(np.min(x), np.max(x), np.min(x), np.max(x)), norm=norm)
+
+    if sep is not None:
+        plt.plot([], [], label=r'$s = {:.0f} \; \mathrm{{Mpc}}/h$'.format(sep), alpha=0) # for legend
+        plt.legend(labelcolor='white')
+        
+    plt.xlabel(r'$\delta_{R}(\mathbf{r})$')
+    plt.ylabel(r'$\delta_{R}(\mathbf{r + s})$')
+    plt.grid(False)
+    plt.xlim(xlim)
+    plt.ylim(xlim)
+    
+    fig = plt.gcf()
+    fig.subplots_adjust(left=0.1, right=1, bottom=0.1)
+    cax = plt.axes((1., 0.195, 0.03, 0.74))
+    cbar = fig.colorbar(image, cax=cax)
+    cbar.set_label(cbar_label, rotation=90)
+    plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.tight_layout()
+    plt.savefig(fn, bbox_inches='tight', dpi=500)
+    plt.close()
+    print('Saved 2D PDF map plot: {}.'.format(fn))
 
 
 def plot_density_splits(x, mean_ds, std_ds, std_ds_ref=None, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, fn=None):
@@ -169,17 +212,15 @@ if __name__ == '__main__':
     parser.add_argument('--cellsize', type=int, required=False, default=10)
     parser.add_argument('--cellsize2', type=int, required=False, default=None)
     parser.add_argument('--resampler', type=str, required=False, default='tsc')
-    parser.add_argument('--smoothing_radius', type=int, required=False, default=None)
+    parser.add_argument('--smoothing_radius', type=int, nargs='+', required=False, default=None)
     parser.add_argument('--use_weights', type=bool, required=False, default=False)
     parser.add_argument('--rsd', type=bool, required=False, default=False)
     parser.add_argument('--los', type=str, required=False, default='x')
     parser.add_argument('--nsplits', type=int, required=False, default=3)
     parser.add_argument('--randoms_size', type=int, required=False, default=4)
     parser.add_argument('--size', type=int, required=False, default=None)
-    parser.add_argument('--show_lognormal', type=bool, required=False, default=True)
-    parser.add_argument('--show_ldt', type=bool, required=False, default=True)
     parser.add_argument('--rescale_var', type=float, required=False, default=1)
-    parser.add_argument('--to_plot', type=str, nargs='+', required=False, default=['pdf1D', 'bias', 'densitysplits'], choices=['pdf1D', 'bias', 'densitysplits'])
+    parser.add_argument('--to_plot', type=str, nargs='+', required=False, default=['pdf1D', 'bias', 'pdf2D', 'densitysplits'], choices=['pdf1D', 'bias', 'pdf2D', 'densitysplits'])
     
     args = parser.parse_args()
     z = args.redshift
@@ -197,11 +238,13 @@ if __name__ == '__main__':
     else:
         data_style = dict(ls='-', color='C0')
         model_styles = {'ldt': dict(ls='-', color='C1'),
-                         'lognormal': dict(ls=':', color='C3')}        
+                         'lognormal': dict(ls=':', color='C3'),
+                         'lognormal_approx': dict(ls='--', color='C3')}        
 
     data_label = 'AbacusSummit'
     model_labels = {'ldt': 'LDT',
-                    'lognormal': 'lognormal'}
+                    'lognormal': 'lognormal',
+                    'lognormal_approx': r'lognormal ($s \rightarrow + \infty$)'}
 
     # Directories
     ds_dir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
@@ -212,157 +255,187 @@ if __name__ == '__main__':
         sim_name = 'AbacusSummit_2Gpc_z{:.3f}_{{}}'.format(z)
     elif args.tracer == 'particles':
         sim_name = 'AbacusSummit_2Gpc_z{:.3f}_{{}}_downsampled_particles_nbar{:.4f}'.format(z, args.nbar)
-    base_name = sim_name + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '')
-    ds_name = base_name + '_3splits_randoms_size4_RH_CCF{}'.format('_RSD' if args.rsd else '')
 
-    # Load measured density split measurements
-    nmocks = 25 if args.nbar < 0.01 else 8
-    fn = os.path.join(ds_dir, ds_name.format('{}mocks'.format(nmocks)) + '_compressed.npy')
-    print('Loading density split measurements: {}'.format(fn))
-    result = CountInCellsDensitySplitMeasurement.load(fn)
-
-    sigma = result.sigma
-    print('sigma:', sigma)
-    print('sigma test:', np.sqrt(np.mean(result.sigma_all**2)))
-    delta3 = result.delta3
-    print('delta3:', delta3)
-    nbar = result.nbar
-    norm = result.norm
-    smoothing_radius = result.smoothing_radius
-
-    # 1D PDF
-    mean_pdf1D = np.mean(result.pdf1D, axis=0)
-    std_pdf1D = np.std(result.pdf1D, axis=0)
-    sigma = np.sqrt(np.sum(result.pdf1D_x**2 * mean_pdf1D)/norm)
-    delta3 = np.sum(result.pdf1D_x**3 * mean_pdf1D)/norm
-    print('sigma test 2:', sigma)
-    print('delta3 test:', delta3)
+    for smoothing_radius in args.smoothing_radius:       
+        base_name = sim_name + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '')
+        ds_name = base_name + '_3splits_randoms_size4_RH_CCF{}'.format('_RSD' if args.rsd else '')
     
-    # Lognormal model
-    lognormalmodel = LognormalDensityModel()
-    #lognormalmodel.get_params_from_moments(m2=sigma**2, m3=delta3)
-    #lognormalmodel.get_params_from_moments(m2=sigma**2, m3=delta3)
-    mask0 = std_pdf1D > 0
-    lognormalmodel.fit_params_from_pdf(delta=result.pdf1D_x[mask0], density_pdf=mean_pdf1D[mask0], sigma=std_pdf1D[mask0])
-    lognormalpdf1D = lognormalmodel.density(result.pdf1D_x)
-
-    # LDT model
-    ldtmodel = LDT(redshift=z, smoothing_scale=smoothing_radius, smoothing_kernel=1, nbar=nbar)
-    sigma_noshotnoise = np.sqrt(sigma**2 - 1 / (nbar * 4/3 * np.pi * smoothing_radius**3))
-    print('sigma no shotnoise:', sigma_noshotnoise)
-    ldtmodel.interpolate_sigma()
-
-    def fit_sigma():
-        def to_fit(x, sig):
-            ldtmodel.compute_ldt(sig, k=(1 + x)*norm)
-            ldtpdf1D = ldtmodel.density_pdf()
-            return ldtpdf1D
-            
-        fit = curve_fit(to_fit, result.pdf1D_x[mask0], mean_pdf1D[mask0], p0=sigma_noshotnoise, sigma=std_pdf1D[mask0])
-        print(fit)
-        return fit[0]
-
-        def compute_ldt(sig):
-            ldtmodel.compute_ldt(sig, k=(1 + result.pdf1D_x)*norm)
-            ldtpdf1D = ldtmodel.density_pdf()
-            residuals = (ldtpdf1D[mask0] - mean_pdf1D[mask0])/std_pdf1D[mask0]
-            return np.sum(residuals**2)        
-        mini = minimize(compute_ldt, sigma_noshotnoise)
-        print(mini)
-        return mini.x
-
-    sigma_noshotnoise = fit_sigma()
-    print('sigma no shotnoise test:', sigma_noshotnoise)
-
-    if args.resampler=='tophat':
-        if interpolate:
-            ldtmodel.compute_ldt(sigma_noshotnoise)
-            ldtpdf1D = ldtmodel.density_pdf(1+result.pdf1D_x)
-        else:
-            ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + result.pdf1D_x)*norm)
-            ldtpdf1D = ldtmodel.density_pdf()            
-    else:
-        ldtmodel.compute_ldt(sigma_noshotnoise)
-        ldtpdf1D = ldtmodel.density_pdf(1 + result.pdf1D_x)
-
-    models_pdf1D = {'ldt': ldtpdf1D, 'lognormal': lognormalpdf1D} if args.nbar > 0.001 else {'ldt': ldtpdf1D}
-
-    # plot settings
-    plotting = {'data_style': data_style, 'data_label': data_label, 'model_labels': model_labels, 'model_styles': model_styles}
-
-    if 'pdf1D' in args.to_plot:
-        # Plot 1D PDF
-        density_name = sim_name + '_cellsize{:d}_resampler{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '')
-        plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF.pdf'
-
-        if args.nbar > 0.01:
-            rebin = 4
-        else:
-            rebin = None
-
-        if args.nbar > 0.001:
-            xlim=(-1, 3)
-        else:
-            xlim=(-1, 4)
+        # Load measured density split measurements
+        nmocks = 25 if args.nbar < 0.01 else 8
+        fn = os.path.join(ds_dir, ds_name.format('{}mocks'.format(nmocks)) + '_compressed.npy')
+        print('Loading density split measurements: {}'.format(fn))
+        result = CountInCellsDensitySplitMeasurement.load(fn)
+    
+        sigma = result.sigma
+        print('sigma:', sigma)
+        print('sigma test:', np.sqrt(np.mean(result.sigma_all**2)))
+        delta3 = result.delta3
+        print('delta3:', delta3)
+        nbar = result.nbar
+        norm = result.norm
+        smoothing_radius = result.smoothing_radius
+    
+        # 1D PDF
+        mean_pdf1D = np.mean(result.pdf1D, axis=0)
+        std_pdf1D = np.std(result.pdf1D, axis=0)
+        sigma = np.sqrt(np.sum(result.pdf1D_x**2 * mean_pdf1D)/norm)
+        delta3 = np.sum(result.pdf1D_x**3 * mean_pdf1D)/norm
+        print('sigma test 2:', sigma)
+        print('delta3 test:', delta3)
         
-        plot_pdf1D(result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=xlim, rebin=rebin, models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
-
-    if 'bias' in args.to_plot:
-        if args.nbar > 0.01:
-            rebin = 8
-        else:
-            rebin = None
-
-        # Bias function
-        for sep in result.bias_function.keys():
-            # Bias function
-            mean_bias = np.mean(result.bias_function[sep], axis=0)
-            std_bias = np.std(result.bias_function[sep], axis=0)
+        # Lognormal model
+        lognormalmodel = LognormalDensityModel()
+        #lognormalmodel.get_params_from_moments(m2=sigma**2, m3=delta3)
+        #lognormalmodel.get_params_from_moments(m2=sigma**2, m3=delta3)
+        mask0 = std_pdf1D > 0
+        lognormalmodel.fit_params_from_pdf(delta=result.pdf1D_x[mask0], density_pdf=mean_pdf1D[mask0], sigma=std_pdf1D[mask0])
+        lognormalpdf1D = lognormalmodel.density(result.pdf1D_x)
     
-            # LDT model
-            ldtbiasmodel = np.array([ldtmodel.bias(1+x) for x in result.bias_function_x[sep]])
-    
-             # Lognormal model
-            lognormalbiasmodel = lognormalmodel.compute_bias_function(result.bias_function_x[sep], xiR=np.mean(result.bias_corr[sep]))
-    
-            models_bias = {'ldt': ldtbiasmodel, 'lognormal': lognormalbiasmodel}
-    
-            # Plot bias function
-            plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
-    
-            plot_bias_function(result.bias_function_x[sep], mean_bias, std_bias, rebin=rebin, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), **plotting)
-
-    if 'densitysplits' in args.to_plot:
-        # Density splits
-        mean_xiR = np.mean(result.smoothed_corr, axis=0)
-        mean_ds, cov = get_split_poles(result.ds_corr, ells=None if args.resampler=='tophat' else ells)
-        std_ds = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, nells)), args.nsplits, axis=1)
-        sep = result.sep
-
-        if args.nbar < 0.001:
-            # save errors
-            fname = base_name.format('{}mocks'.format(nmocks)) + '_densitysplits_std'
-            np.save(os.path.join(ds_dir, fname), std_ds)
-
-        # Load errors from mocks with nbar = 0.0005
-        fname = 'AbacusSummit_2Gpc_z0.800_25mocks_downsampled_particles_nbar0.0005_cellsize5_cellsize5_resamplertophat_smoothingR10_densitysplits_std.npy'
-        std_ds_desi = np.load(os.path.join(ds_dir, fname))
-        print(std_ds)
-        print(std_ds_desi)
-            
         # LDT model
+        ldtmodel = LDT(redshift=z, smoothing_scale=smoothing_radius, smoothing_kernel=1, nbar=nbar)
+        sigma_noshotnoise = np.sqrt(sigma**2 - 1 / (nbar * 4/3 * np.pi * smoothing_radius**3))
+        print('sigma no shotnoise:', sigma_noshotnoise)
+        ldtmodel.interpolate_sigma()
+    
+        def fit_sigma():
+            def to_fit(x, sig):
+                ldtmodel.compute_ldt(sig, k=(1 + x)*norm)
+                ldtpdf1D = ldtmodel.density_pdf()
+                return ldtpdf1D
+                
+            fit = curve_fit(to_fit, result.pdf1D_x[mask0], mean_pdf1D[mask0], p0=sigma_noshotnoise, sigma=std_pdf1D[mask0])
+            print(fit)
+            return fit[0]
+    
+            def compute_ldt(sig):
+                ldtmodel.compute_ldt(sig, k=(1 + result.pdf1D_x)*norm)
+                ldtpdf1D = ldtmodel.density_pdf()
+                residuals = (ldtpdf1D[mask0] - mean_pdf1D[mask0])/std_pdf1D[mask0]
+                return np.sum(residuals**2)        
+            mini = minimize(compute_ldt, sigma_noshotnoise)
+            print(mini)
+            return mini.x
+    
+        sigma_noshotnoise = fit_sigma()
+        print('sigma no shotnoise test:', sigma_noshotnoise)
+    
+        if args.resampler=='tophat':
+            if interpolate:
+                ldtmodel.compute_ldt(sigma_noshotnoise)
+                ldtpdf1D = ldtmodel.density_pdf(1+result.pdf1D_x)
+            else:
+                ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + result.pdf1D_x)*norm)
+                ldtpdf1D = ldtmodel.density_pdf()            
+        else:
+            ldtmodel.compute_ldt(sigma_noshotnoise)
+            ldtpdf1D = ldtmodel.density_pdf(1 + result.pdf1D_x)
+    
+        models_pdf1D = {'ldt': ldtpdf1D, 'lognormal': lognormalpdf1D} if args.nbar > 0.001 else {'ldt': ldtpdf1D}
+    
+        # plot settings
+        plotting = {'data_style': data_style, 'data_label': data_label, 'model_labels': model_labels, 'model_styles': model_styles}
+    
+        if 'pdf1D' in args.to_plot:
+            # Plot 1D PDF
+            density_name = sim_name + '_cellsize{:d}_resampler{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '')
+            plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF.pdf'
+    
+            if args.nbar > 0.01:
+                rebin = 4
+            else:
+                rebin = None
+    
+            if args.nbar > 0.001:
+                xlim=(-1, 3)
+            else:
+                xlim=(-1, 4)
+            
+            plot_pdf1D(result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=xlim, rebin=rebin, models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
+    
+        if 'bias' in args.to_plot:
+            if args.nbar > 0.01:
+                rebin = 8
+            else:
+                rebin = None
+    
+            # Bias function
+            for sep in result.bias_function.keys():
+                # Mocks
+                mean_bias = np.mean(result.bias_function[sep], axis=0)
+                std_bias = np.std(result.bias_function[sep], axis=0)
+        
+                # LDT model
+                ldtbiasmodel = ldtmodel.bias(rho=1+result.bias_function_x[sep])
+        
+                 # Lognormal model
+                lognormalbiasmodel = lognormalmodel.compute_bias_function(result.bias_function_x[sep], xiR=np.mean(result.bias_corr[sep]))
+                lognormalbiasmodel_approx = lognormalmodel.compute_bias_function_approx(result.bias_function_x[sep])
+        
+                #models_bias = {'ldt': ldtbiasmodel, 'lognormal': lognormalbiasmodel, 'lognormal_approx': lognormalbiasmodel_approx}
+                models_bias = {'ldt': ldtbiasmodel, 'lognormal': lognormalbiasmodel}
+        
+                # Plot bias function
+                plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
+        
+                plot_bias_function(result.bias_function_x[sep], mean_bias, std_bias, rebin=rebin, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), **plotting)
+    
+        # LDTmodel
         ldtdsplitmodel = LDTDensitySplitModel(ldtmodel, density_bins=result.bins)
-        ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR)
     
         # Lognormal model
         lognormaldsplitmodel = LognormalDensitySplitModel(density_bins=result.bins)
         lognormaldsplitmodel.set_params(sigma=lognormalmodel.sigma, delta0=lognormalmodel.delta0, delta02=lognormalmodel.delta0, sigma2=lognormalmodel.sigma)
-        lognormaldsplits = lognormaldsplitmodel.compute_dsplits(smoothing=1, sep=sep, xiR=mean_xiR, rsd=False, ells=ells)
     
-        models_ds = {'ldt': ldtdsplits, 'lognormal': lognormaldsplits}
+        if 'pdf2D' in args.to_plot:
+            # 2D PDF
+            for sep in result.hist2D.keys():
+                mean_hist = np.mean(result.hist2D[sep], axis=0)
+                std_hist = np.std(result.hist2D[sep], axis=0)
+                
+                # LDT model
+                ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(result.bias_corr[sep]))
+                models = {'ldt': ldtmodelpdf2D}
+                vmax = np.max([np.nanmax(std_hist), np.nanmax(np.abs(ldtmodelpdf2D-mean_hist))])
+                print(vmax)
     
-        for m in ['lognormal', 'ldt']:
-            plot_name = base_name.format('{}mocks'.format(nmocks)) + '_densitysplits_{}model.pdf'.format(m)
-            models = {m: models_ds[m]}
-            plot_density_splits(sep, mean_ds, std_ds, std_ds_ref=std_ds_desi, models=models, fn=os.path.join(plots_dir, plot_name), **plotting)
+                # Plot 2D PDF
+                plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_s{:.0f}_hist2D_mean.pdf'.format(float(sep))
+                plot_pdf2D(result.hist2D_x[sep], mean_hist, std_hist, plot='mean_hist', cbar_label=r'$\mathcal{P}$', xlim=(-1, 2.5), sep=float(sep), fn=os.path.join(plots_dir, plot_name))
+    
+                # Plot 2D PDF error
+                plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_s{:.0f}_hist2D_std.pdf'.format(float(sep))
+                plot_pdf2D(result.hist2D_x[sep], mean_hist, std_hist, plot='std_hist', vmax=vmax, cbar_label=r'$\sigma_{\mathcal{P}}$', xlim=(-1, 2.5), sep=float(sep), fn=os.path.join(plots_dir, plot_name))
+                
+                # Plot LDT model
+                plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_s{:.0f}_hist2D_ldt.pdf'.format(float(sep))
+                plot_pdf2D(result.hist2D_x[sep], mean_hist, std_hist, plot='ldt', vmax=vmax, cbar_label=r'$\Delta \mathcal{P}$', xlim=(-1, 2.5), sep=float(sep), models=models, fn=os.path.join(plots_dir, plot_name))
+    
+        if 'densitysplits' in args.to_plot:
+            # Density splits
+            mean_xiR = np.mean(result.smoothed_corr, axis=0)
+            mean_ds, cov = get_split_poles(result.ds_corr, ells=None if args.resampler=='tophat' else ells)
+            std_ds = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, nells)), args.nsplits, axis=1)
+            sep = result.sep
+    
+            if args.nbar < 0.001:
+                # save errors
+                fname = base_name.format('{}mocks'.format(nmocks)) + '_densitysplits_std'
+                np.save(os.path.join(ds_dir, fname), std_ds)
+    
+            # Load errors from mocks with nbar = 0.0005
+            fname = 'AbacusSummit_2Gpc_z0.800_25mocks_downsampled_particles_nbar0.0005_cellsize5_cellsize5_resamplertophat_smoothingR10_densitysplits_std.npy'
+            std_ds_desi = np.load(os.path.join(ds_dir, fname))
+                
+            # LDT model
+            ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR)
         
+            # Lognormal model
+            lognormaldsplits = lognormaldsplitmodel.compute_dsplits(smoothing=1, sep=sep, xiR=mean_xiR, rsd=False, ells=ells)
+        
+            models_ds = {'ldt': ldtdsplits, 'lognormal': lognormaldsplits}
+        
+            for m in ['lognormal', 'ldt']:
+                plot_name = base_name.format('{}mocks'.format(nmocks)) + '_densitysplits_{}model.pdf'.format(m)
+                models = {m: models_ds[m]}
+                plot_density_splits(sep, mean_ds, std_ds, std_ds_ref=std_ds_desi, models=models, fn=os.path.join(plots_dir, plot_name), **plotting)
+            
