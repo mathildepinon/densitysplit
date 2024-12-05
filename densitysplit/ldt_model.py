@@ -137,6 +137,7 @@ class LDT(BaseClass):
 
     def compute_ldt(self, sigma_val, nu=21/13, k=None):
         self.yvals = np.arange(0.03, 15, 0.01)
+        self.ymax = 12
         self.nu = nu
         self.Tau = lambda y: self.nu*(1 - (1/y)**(1/self.nu))
         self.tau = self.nu*(1 - (1/self.yvals)**(1/self.nu))
@@ -185,7 +186,7 @@ class LDT(BaseClass):
         if self.nbar is None:
             return self.density_pdf_noshotnoise(rho, **kwargs)
         else:
-            ymax = 12
+            ymax = self.ymax
             mask = self.yvals < ymax
             x = self.yvals[mask]
             density_pdfvals = self.density_pdf_noshotnoise(x, **kwargs)
@@ -207,32 +208,38 @@ class LDT(BaseClass):
                 return func(k) * norm # k may not be flat
 
     def lowrhobias(self, rho):
-        return self.sigma_interp(self.smoothing_scale)**2 / (self.sigma_interp(rho**(1 / 3) * self.smoothing_scale)**2 * self.eff_sigma_log**2) * self.Tau(rho)
+        #return self.sigma_interp(self.smoothing_scale)**2 / (self.sigma_interp(rho**(1 / 3) * self.smoothing_scale)**2 * self.eff_sigma_log**2) * self.Tau(rho)
+        return self.Tau(rho) / (self.sigma_interp(rho**(1 / 3) * self.smoothing_scale)**2)
 
     def expbiasnorm(self):
-        ymax = 12
-        if self.kvals is None:
-            mask = self.yvals < ymax
-            x = self.yvals[mask]
-            self.xvals = x
-            self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
-        else:
-            x = self.kvals/self.norm
-            mask = (x>=np.min(self.yvals)) & (x<ymax)
-            x = x[mask]
-            self.xvals = x
-            self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
+        ymax = self.ymax
+        # if self.kvals is None:
+        #     mask = self.yvals < ymax
+        #     x = self.yvals[mask]
+        #     self.xvals = x
+        #     self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
+        # else:
+        #     x = self.kvals/self.norm
+        #     mask = (x>=np.min(self.yvals)) & (x<ymax)
+        #     x = x[mask]
+        #     self.xvals = x
+        #     self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
+        mask = self.yvals < ymax
+        x = self.yvals[mask]
+        self.xvals = x
         lowrhobias = self.lowrhobias(x)
+        self.density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
         self.low_rho_bias = lowrhobias
         self.exp_bias_norm = np.trapz(lowrhobias * self.density_pdfvals_noshotnoise, x=x)
         return self.exp_bias_norm
     
     def exprhobiasnorm(self):
         integrand = self.xvals * (self.low_rho_bias - self.exp_bias_norm) * self.density_pdfvals_noshotnoise
-        if self.kvals is None:
-            return np.trapz(integrand, x=self.xvals)
-        else:
-            return np.sum(integrand)/self.norm
+        # if self.kvals is None:
+        #     return np.trapz(integrand, x=self.xvals)
+        # else:
+        #     return np.sum(integrand)/self.norm
+        return np.trapz(integrand, x=self.xvals)
     
     # bias function
     def bias_noshotnoise(self, rho, b1=1):
@@ -243,18 +250,18 @@ class LDT(BaseClass):
 
     # bias function convolved with Poisson shot noise
     def bias(self, rho=None, **kwargs):
-        ymax = 12
+        ymax = self.ymax
         mask = self.yvals < ymax
         x = self.yvals[mask]
         norm = self.norm
         bias_func = self.bias_noshotnoise(x, **kwargs)
         density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x, **kwargs)
-        test = bias_func*density_pdfvals_noshotnoise
+        prod = bias_func*density_pdfvals_noshotnoise
         density_pdfvals = self.density_pdf(rho=rho, **kwargs)        
         def func(N):
             log_poisson_pdf = N * np.log(norm * x[:, None]) - (norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
             poisson_pdf = np.exp(log_poisson_pdf)
-            res = np.trapz(poisson_pdf * test[:, None], x=x, axis=0)
+            res = np.trapz(poisson_pdf * prod[:, None], x=x, axis=0)
             return res
         if (self.kvals is None) and (rho is not None):
             k = np.round(norm * rho)
@@ -314,7 +321,7 @@ class LDTDensitySplitModel(LDT):
         res = alpha * self.joint_density_pdf_nonorm(xi, beta*rho1, beta*rho2, **kwargs)
         return res
 
-    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None, **kwargs):
+    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None, density_pdf=None, bias=None, **kwargs):
         if nsplits is not None:
             self.nsplits = nsplits
         if density_bins is not None:
@@ -329,32 +336,24 @@ class LDTDensitySplitModel(LDT):
             test = self.kvals/self.norm
             xvals, yvals = 1+x[0], 1+x[1]
         rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
-        if self.kvals is not None:
-            density_pdf_2D = self.joint_density_pdf(xi, **kwargs)
-            innerint = np.sum(rho2 * density_pdf_2D, axis=-1)/self.norm
-        else:
-            density_pdf_2D = self.joint_density_pdf(xi, rho1=rho1[:, 0], rho2=rho2[0, :], **kwargs)
-            innerint = np.trapz(rho2 * density_pdf_2D, x=yvals, axis=-1)
+        t0 = time.time()
         dsplits = list()
+        if density_pdf is None:
+            density_pdf = self.density_pdf(xvals, **kwargs)
+        if bias is None:
+            bias = self.bias(rho=xvals, **kwargs)
+        toint = bias * density_pdf
         for i in range(len(self.density_bins)-1):
             d1 = max(self.density_bins[i], -1)
             d2 = self.density_bins[i+1]
             self.logger.info('Computing LDT density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
-            t0 = time.time()
-            ds_mask = (rho1[:, 0] >= 1 + d1) & (rho1[:, 0] < 1 + d2)
-            if self.kvals is not None:
-                outerint = np.sum(innerint[..., ds_mask], axis=-1)/self.norm
-                norm =  np.sum(np.sum(density_pdf_2D, axis=-1)[..., ds_mask], axis=-1)/self.norm**2
-            else:
-                outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
-                norm =  np.trapz(np.trapz(density_pdf_2D, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
-            #norm = np.sum(self.density_pdf(rho1[:, 0][ds_mask], **kwargs))/self.norm
-            #print(norm)
-            res = outerint/norm - 1
-            self.logger.info('Computed LDT model in split {:.2f}, {:.2f} for {} xi values in elapsed time: {}s'.format(d1, d2, len(np.array(xi)), time.time()-t0))
-            dsplits.append(res)
+            ds_mask = (xvals >= 1 + d1) & (xvals < 1 + d2)
+            res = np.nansum(toint[ds_mask])/self.norm
+            norm = np.nansum(density_pdf[ds_mask])/self.norm
+            dsplits.append(res/norm * xi)
+        self.logger.info('Computed LDT model for {} xi values in elapsed time: {}s'.format(len(np.array(xi)), time.time()-t0))
         return dsplits
-
+ 
     def compute_dsplits_test(self, nsplits=None, density_bins=None, joint_density_pdf=None, x1=None, x2=None):
         if nsplits is not None:
             self.nsplits = nsplits
