@@ -6,7 +6,7 @@ import numpy as np
 from operator import mul
 from functools import reduce
 from scipy.integrate import quad
-from scipy.optimize import fsolve
+from scipy.optimize import fsolve, minimize, curve_fit
 from scipy.interpolate import interp1d
 from scipy.special import factorial, loggamma
 
@@ -136,8 +136,8 @@ class LDT(BaseClass):
         self.sigma_interp = interp1d(Rvals, sigmavals, kind=7, bounds_error=False)
 
     def compute_ldt(self, sigma_val, nu=21/13, k=None):
-        self.yvals = np.arange(0.03, 15, 0.01)
-        self.ymax = 12
+        self.yvals = np.arange(0.03, 25, 0.01)
+        self.ymax = 7
         self.nu = nu
         self.Tau = lambda y: self.nu*(1 - (1/y)**(1/self.nu))
         self.tau = self.nu*(1 - (1/self.yvals)**(1/self.nu))
@@ -217,13 +217,13 @@ class LDT(BaseClass):
         def fL(delta_L):
             toret = np.exp(- bG1**2/(2*bG2)) / np.sqrt(1 + bG2 * sigma_m**2) * np.exp((bG2 * (bG1/bG2 + delta_L)**2)/(2 * (1 + bG2 * sigma_m**2)))
             return toret
+            #return np.exp(bG1 * delta_L + bG2 / 2. * delta_L**2)
         x = self.yvals[self.yvals < self.ymax]
-        delta_m = x - 1
-        delta_L = self.tau[self.yvals < self.ymax] - 1
+        delta_L = self.tau[self.yvals < self.ymax]
         fLm = fL(delta_L)
         pdf_noshotnoise = self.density_pdf_noshotnoise(x)
         mean_term = np.trapz(x * fLm * pdf_noshotnoise, x=x)
-        toret = (1 + delta_m) * fLm - mean_term - 1
+        toret = x * fLm / mean_term - 1
         return toret
 
     def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0):
@@ -232,7 +232,7 @@ class LDT(BaseClass):
         logpdf = - np.log(alpha) - Nt_expect/alpha - loggamma(1+Nt/alpha) + Nt[None, :]/alpha * np.log(Nt_expect/alpha)
         return np.exp(logpdf)
 
-    def tracer_density_pdf(self, rho=None, k=None, **kwargs): # convolve density PDF with Poisson shot noise
+    def tracer_density_pdf(self, rho=None, k=None, **kwargs): # bias model from Gould et al 2024
         x = self.yvals[self.yvals < self.ymax]
         density_pdfvals = self.density_pdf_noshotnoise(x)[:, None]
         norm = self.norm
@@ -300,6 +300,103 @@ class LDT(BaseClass):
         else:
             k=self.kvals
             return func(k) * norm / density_pdfvals
+
+    def fit_from_pdf(self, x, y, err=None, sigma_init=1., bias=None, norm=None):
+        mask = (x >= -0.5) & (x < 4)
+        if err is not None:
+            mask &= err > 0
+            err = err[mask]
+
+        def to_fit(x, *params):
+            self.compute_ldt(params[0], k=(1 + x)*norm)
+            if bias == 'linear':
+                ldtpdf1D = self.density_pdf(b1=params[1])
+            elif bias == 'gould':
+                param_dict = {'bG1': params[1], 'bG2': params[2], 'alpha0': params[3], 'alpha1': params[4], 'alpha2': params[5]}
+                #param_dict = {'bG1': params[1], 'bG2': params[2]}
+                ldtpdf1D = self.tracer_density_pdf(rho=(1 + x), **param_dict)
+            else:
+                ldtpdf1D = self.density_pdf()
+            return ldtpdf1D
+
+        # def to_min(sig):
+        #     self.compute_ldt(sig, k=(1 + x)*norm)
+        #     ldtpdf1D = self.density_pdf()
+        #     residuals = (ldtpdf1D[mask] - y[mask])/err
+        #     return np.sum(residuals**2)  
+
+        # from iminuit import Minuit
+        # m = Minuit(to_min, sig=sigma_init)
+        # m.migrad()
+        # imin = m.hesse()
+        # print(imin)
+        # toret = imin.params['sig'].value
+        # return toret
+      
+        # mini = minimize(to_min, sigma_init)
+        # print(mini)
+        # return mini.x
+        
+        if bias == 'linear':
+            p0 = [sigma_init, 1.]
+        elif bias == 'gould':
+            p0 = [sigma_init, 0.7, -1.25, 1, 0, 0]
+        else:
+            p0 = [sigma_init]
+        fit = curve_fit(to_fit, x[mask], y[mask], p0=p0, sigma=err)
+        print(fit)
+        return fit[0]
+
+    def fit_from_sample(self, N_sample, sigma_ini=None, ldt_values_fn='/feynman/scratch/dphp/mp270220/outputs/ldt_grid.npy'):
+        from scipy.interpolate import RegularGridInterpolator
+
+        def ldt_sigma_interp(sigma, N):
+            self.compute_ldt(sigma, k=N)
+            return self.density_pdf()
+
+        if os.path.isfile(ldt_values_fn):
+            ldt_values_dict = np.load(ldt_values_fn, allow_pickle=True).item()
+            sigma_grid = ldt_values_dict['sigma']
+            N_grid = ldt_values_dict['N']
+            ldt_values = ldt_values_dict['values']
+        else:
+            sigma_grid = np.arange(0.4, 0.6, 0.00001)
+            N_grid = np.arange(0, 200)
+            ldt_values = np.array([ldt_sigma_interp(s, N_grid) for s in sigma_grid])
+            tosave = {'sigma': sigma_grid, 'N': N_grid, 'values': ldt_values}
+            np.save(ldt_values_fn, tosave)
+            print('saved pre-computed LDT values')
+        
+        # interpolate
+        ldt_interpolator = RegularGridInterpolator((sigma_grid, N_grid), ldt_values, bounds_error=False, fill_value=0)
+
+        N = N_sample.flatten()
+        N_splits = np.split(N, 40) # split because the whole array is to big for memory
+
+        def loglikelihood(sigma):
+            toret = 0
+            for N_split in N_splits:
+                ldtpdf1D_split = ldt_interpolator((sigma, N_split))
+                logpdf = np.log(ldtpdf1D_split)
+                maskinf = np.logical_not(np.isinf(logpdf))
+                toret += np.nansum(logpdf[maskinf])
+            return -toret # to minimize (-loglikelihood)
+
+        from iminuit import Minuit
+        t0 = time.time()
+        #mini = minimize(loglikelihood, sigma_ini, bounds=[(0.4, 0.6)])
+        #toret = mini.x
+        #print(mini)
+        m = Minuit(loglikelihood, sigma=sigma_ini)
+        m.limits = [(0.4, 0.6)]
+        imin = m.migrad()
+        #imin = m.hesse()
+        toret = imin.params['sigma'].value
+        t1 = time.time()
+        print('minimization in elapsed time {}s'.format(t1-t0))
+        print(imin)
+        return toret
+
             
 
 class LDTDensitySplitModel(LDT):
@@ -388,34 +485,26 @@ class LDTDensitySplitModel(LDT):
         self.logger.info('Computed LDT model for {} xi values in elapsed time: {}s'.format(len(np.array(xi)), time.time()-t0))
         return dsplits
  
-    def compute_dsplits_test(self, nsplits=None, density_bins=None, joint_density_pdf=None, x1=None, x2=None):
+    def compute_dsplits_test(self, xi, nsplits=None, density_bins=None, x=None, **kwargs):
         if nsplits is not None:
             self.nsplits = nsplits
         if density_bins is not None:
             self.density_bins = density_bins
-        rho1, rho2 = 1+x1, 1+x2
-        innerint = np.trapz(rho2 * joint_density_pdf, x=rho2[0, :], axis=-1)
-        #norm_test = np.trapz(np.trapz(joint_density_pdf, x=rho1[:, 0], axis=-2), x=rho2[0, :], axis=-1)
-        #print('2D pdf normalization: 1 = ', norm_test)
-        #norm_test = np.trapz(np.trapz(rho2*joint_density_pdf, x=rho1[:, 0], axis=-2), x=rho2[0, :], axis=-1)
-        #print('2D pdf avg: 1 = ', norm_test)
-        #norm_test = np.trapz(density_pdf, x=rho1[:, 0])
-        #print('1D pdf normalization: 1 = ', norm_test)
-        #density_pdf /= norm_test
+        xvals = yvals = self.kvals/self.norm
+        rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
+        joint_density_pdf = self.joint_density_pdf(xi, **kwargs)
+        print(joint_density_pdf.shape)
         dsplits = list()
         for i in range(len(self.density_bins)-1):
             d1 = self.density_bins[i]
             d2 = self.density_bins[i+1]
             self.logger.info('Computing density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
+            ds_mask = (rho2[0, :] >= 1 + d1) & (rho2[0, :] <= 1 + d2)
+            innerint = np.trapz(joint_density_pdf[..., ds_mask], x=rho2[0, :][ds_mask], axis=-1)
             t0 = time.time()
             ds_mask = (rho1[:, 0] >= 1 + d1) & (rho1[:, 0] <= 1 + d2)
-            print(rho1[:, 0][ds_mask] - 1)
             outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
             norm =  np.trapz(np.trapz(joint_density_pdf, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
-            #print(outerint)
-            #norm = np.trapz(density_pdf[ds_mask], x=rho1[:, 0][ds_mask])
-            #print(norm)
-            #print(np.trapz(np.trapz(self.joint_density_pdf(rho1, rho2, xi), x=rho2[:, 0], axis=-2), x=rho1[0], axis=-1))
             res = outerint/norm - 1
             dsplits.append(res)
         return dsplits
