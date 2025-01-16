@@ -137,7 +137,7 @@ class LDT(BaseClass):
 
     def compute_ldt(self, sigma_val, nu=21/13, k=None):
         self.yvals = np.arange(0.03, 25, 0.01)
-        self.ymax = 7
+        self.ymax = 12
         self.nu = nu
         self.Tau = lambda y: self.nu*(1 - (1/y)**(1/self.nu))
         self.tau = self.nu*(1 - (1/self.yvals)**(1/self.nu))
@@ -215,9 +215,9 @@ class LDT(BaseClass):
     def delta_t_expect(self, bG1=1, bG2=-1):
         sigma_m = self.sigma_val
         def fL(delta_L):
-            toret = np.exp(- bG1**2/(2*bG2)) / np.sqrt(1 + bG2 * sigma_m**2) * np.exp((bG2 * (bG1/bG2 + delta_L)**2)/(2 * (1 + bG2 * sigma_m**2)))
-            return toret
-            #return np.exp(bG1 * delta_L + bG2 / 2. * delta_L**2)
+            #toret = np.exp(- bG1**2/(2*bG2)) / np.sqrt(1 + bG2 * sigma_m**2) * np.exp((bG2 * (bG1/bG2 + delta_L)**2)/(2 * (1 + bG2 * sigma_m**2)))
+            #return toret
+            return np.exp(bG1 * delta_L + bG2 / 2. * delta_L**2)
         x = self.yvals[self.yvals < self.ymax]
         delta_L = self.tau[self.yvals < self.ymax]
         fLm = fL(delta_L)
@@ -229,8 +229,11 @@ class LDT(BaseClass):
     def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0):
         alpha = self.alpha(alpha0, alpha1, alpha2)[:, None]
         Nt_expect = self.norm * (1 + self.delta_t_expect(bG1, bG2)[:, None])
+        mask0 = (Nt_expect[:, 0] == 0)
         logpdf = - np.log(alpha) - Nt_expect/alpha - loggamma(1+Nt/alpha) + Nt[None, :]/alpha * np.log(Nt_expect/alpha)
-        return np.exp(logpdf)
+        toret = np.exp(logpdf)
+        toret[mask0, :] = 0
+        return toret
 
     def tracer_density_pdf(self, rho=None, k=None, **kwargs): # bias model from Gould et al 2024
         x = self.yvals[self.yvals < self.ymax]
@@ -301,6 +304,30 @@ class LDT(BaseClass):
             k=self.kvals
             return func(k) * norm / density_pdfvals
 
+    # bias function with bias and shot noise model from Gould et al 2024
+    def tracer_bias(self, rho=None, **kwargs):
+        ymax = self.ymax
+        mask = self.yvals < ymax
+        x = self.yvals[mask]
+        norm = self.norm
+        bias_func = self.bias_noshotnoise(x)
+        density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
+        print('pdf no shot noise:', density_pdfvals_noshotnoise)
+        prod = bias_func*density_pdfvals_noshotnoise
+        density_pdfvals = self.tracer_density_pdf(rho=rho, **kwargs)
+        def func(N):
+            Nt_pdf = self.Nt_pdf(N, **kwargs)
+            print('Nt_pdf', Nt_pdf)
+            res = np.trapz(Nt_pdf * prod[:, None], x=x, axis=0)
+            return res
+        if (self.kvals is None) and (rho is not None):
+            k = np.round(norm * rho)
+            k = np.append(k, np.max(k)+1)
+            return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm / density_pdfvals
+        else:
+            k=self.kvals
+            return func(k) * norm / density_pdfvals
+
     def fit_from_pdf(self, x, y, err=None, sigma_init=1., bias=None, norm=None):
         mask = (x >= -0.5) & (x < 4)
         if err is not None:
@@ -312,8 +339,8 @@ class LDT(BaseClass):
             if bias == 'linear':
                 ldtpdf1D = self.density_pdf(b1=params[1])
             elif bias == 'gould':
-                param_dict = {'bG1': params[1], 'bG2': params[2], 'alpha0': params[3], 'alpha1': params[4], 'alpha2': params[5]}
-                #param_dict = {'bG1': params[1], 'bG2': params[2]}
+                #param_dict = {'bG1': params[1], 'bG2': params[2], 'alpha0': params[3], 'alpha1': params[4], 'alpha2': params[5]}
+                param_dict = {'bG1': params[1], 'bG2': params[2]}
                 ldtpdf1D = self.tracer_density_pdf(rho=(1 + x), **param_dict)
             else:
                 ldtpdf1D = self.density_pdf()
@@ -340,7 +367,7 @@ class LDT(BaseClass):
         if bias == 'linear':
             p0 = [sigma_init, 1.]
         elif bias == 'gould':
-            p0 = [sigma_init, 0.7, -1.25, 1, 0, 0]
+            p0 = [sigma_init, 0.7, -1.25]
         else:
             p0 = [sigma_init]
         fit = curve_fit(to_fit, x[mask], y[mask], p0=p0, sigma=err)
@@ -448,7 +475,7 @@ class LDTDensitySplitModel(LDT):
         res = alpha * self.joint_density_pdf_nonorm(xi, beta*rho1, beta*rho2, **kwargs)
         return res
 
-    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None, density_pdf=None, bias=None, **kwargs):
+    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None, density_pdf=None, bias=None, bias_model='gould', **kwargs):
         if nsplits is not None:
             self.nsplits = nsplits
         if density_bins is not None:
@@ -466,9 +493,15 @@ class LDTDensitySplitModel(LDT):
         t0 = time.time()
         dsplits = list()
         if density_pdf is None:
-            density_pdf = self.density_pdf(xvals, **kwargs)
+            if bias_model=='gould':
+                density_pdf = self.tracer_density_pdf(xvals, **kwargs)
+            else:
+                density_pdf = self.density_pdf(xvals, **kwargs)
         if bias is None:
-            bias = self.bias(rho=xvals, **kwargs)
+            if bias_model=='gould':
+                bias = self.tracer_bias(rho=xvals, **kwargs)/(1+kwargs['bG1'])
+            else:
+                bias = self.bias(rho=xvals, **kwargs)
         print('bias shape: ', bias.shape)
         if bias.ndim > 1:
             toint = bias * density_pdf[:, None]
