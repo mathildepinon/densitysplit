@@ -175,7 +175,7 @@ class LDT(BaseClass):
         self.logs1 = logs1
         logs0 = self.logs(0, self.eff_sigma_log)
         self.logs0 = logs0
-        lowlogrho_func = interp1d(self.yvals, self.lowlogrho(self.eff_sigma_log), kind=7)
+        lowlogrho_func = interp1d(self.yvals, self.lowlogrho(self.eff_sigma_log), kind=7, bounds_error=False, fill_value=0)
         if (isinstance(rho, list) or isinstance(rho, np.ndarray)) and len(rho) > 0:
             lowlogrho = np.array([lowlogrho_func(rhoo * logs1/logs0) for rhoo in rho])
         else:
@@ -212,24 +212,46 @@ class LDT(BaseClass):
         delta_m = x - 1
         return alpha0 + alpha1 * delta_m + alpha2 * delta_m**2
 
-    def delta_t_expect(self, bG1=1, bG2=-1):
+    def delta_t_expect(self, rho=None, bG1=1, bG2=-1, model='gaussian'):
         sigma_m = self.sigma_val
         def fL(delta_L):
-            #toret = np.exp(- bG1**2/(2*bG2)) / np.sqrt(1 + bG2 * sigma_m**2) * np.exp((bG2 * (bG1/bG2 + delta_L)**2)/(2 * (1 + bG2 * sigma_m**2)))
-            #return toret
-            return np.exp(bG1 * delta_L + bG2 / 2. * delta_L**2)
-        x = self.yvals[self.yvals < self.ymax]
-        delta_L = self.tau[self.yvals < self.ymax]
-        fLm = fL(delta_L)
-        pdf_noshotnoise = self.density_pdf_noshotnoise(x)
-        mean_term = np.trapz(x * fLm * pdf_noshotnoise, x=x)
-        toret = x * fLm / mean_term - 1
+            toret = np.exp(- bG1**2/(2*bG2)) / np.sqrt(1 + bG2 * sigma_m**2) * np.exp((bG2 * (bG1/bG2 + delta_L)**2)/(2 * (1 + bG2 * sigma_m**2)))
+            return toret
+            #return np.exp(bG1 * delta_L + bG2 / 2. * delta_L**2)
+            #return 1 + bG1 * delta_L + bG2 / 2. * delta_L**2
+        if rho is not None:
+            x = rho
+            delta_L = self.Tau(x)
+        else:
+            x = self.yvals[self.yvals < self.ymax]
+            delta_L = self.tau[self.yvals < self.ymax]
+        if model=='gaussian':
+            fLm = fL(delta_L)
+            pdf_shotnoise = self.density_pdf(rho=x)
+            mean_term = np.trapz(x * fLm * pdf_shotnoise, x=x)
+            toret = x * fLm - 1 #- mean_term #- 1
+        elif model=='eulerian':
+            toret = bG1 * (x-1) + bG2 / 2 * ((x-1)**2 - sigma_m**2)
         return toret
 
-    def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0):
+    def delta_t_expect_shotnoise(self, rho=None, bG1=1, bG2=-1, model='gaussian', matter_norm=None):
+        ymax = self.ymax
+        mask = self.yvals < ymax
+        x = self.yvals[mask]
+        def func(N):
+            log_poisson_pdf = N * np.log(matter_norm * x[:, None]) - (matter_norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
+            poisson_pdf = np.exp(log_poisson_pdf)
+            return poisson_pdf
+        if rho is None:
+            rho = self.kvals / matter_norm
+        delta_t_expect = self.delta_t_expect(rho=rho, bG1=bG1, bG2=bG2, model=model)
+        toret = matter_norm * np.trapz(func(np.round(matter_norm * rho)) * delta_t_expect[None, :], x=rho, axis=1)
+        return toret
+
+    def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0, model='gaussian', matter_norm=None):
         alpha = self.alpha(alpha0, alpha1, alpha2)[:, None]
-        Nt_expect = self.norm * (1 + self.delta_t_expect(bG1, bG2)[:, None])
-        mask0 = (Nt_expect[:, 0] == 0)
+        Nt_expect = self.norm * (1 + self.delta_t_expect(bG1=bG1, bG2=bG2, model=model)[:, None])
+        mask0 = (Nt_expect[:, 0] <= 0)
         logpdf = - np.log(alpha) - Nt_expect/alpha - loggamma(1+Nt/alpha) + Nt[None, :]/alpha * np.log(Nt_expect/alpha)
         toret = np.exp(logpdf)
         toret[mask0, :] = 0
@@ -328,20 +350,29 @@ class LDT(BaseClass):
             k=self.kvals
             return func(k) * norm / density_pdfvals
 
-    def fit_from_pdf(self, x, y, err=None, sigma_init=1., bias=None, norm=None):
-        mask = (x >= -0.5) & (x < 4)
+    def fit_from_pdf(self, x, y, err=None, sigma_init=1., fix_sigma=True, bias=None, norm=None, super_poisson=True, matter_norm=None, xlim=None):
+        mask = (x >= -1) & (x < np.inf)
+        if xlim is not None:
+            mask &= (x >= xlim[0]) & (x < xlim[1])
         if err is not None:
             mask &= err > 0
             err = err[mask]
 
         def to_fit(x, *params):
-            self.compute_ldt(params[0], k=(1 + x)*norm)
+            istart = 0
+            if fix_sigma:
+                self.compute_ldt(sigma_init, k=(1 + x)*norm)
+            else:
+                self.compute_ldt(params[0], k=(1 + x)*norm)
+                istart = 1
             if bias == 'linear':
-                ldtpdf1D = self.density_pdf(b1=params[1])
-            elif bias == 'gould':
-                #param_dict = {'bG1': params[1], 'bG2': params[2], 'alpha0': params[3], 'alpha1': params[4], 'alpha2': params[5]}
-                param_dict = {'bG1': params[1], 'bG2': params[2]}
-                ldtpdf1D = self.tracer_density_pdf(rho=(1 + x), **param_dict)
+                ldtpdf1D = self.density_pdf(b1=params[istart])
+            elif bias in ['eulerian', 'gaussian']:
+                if super_poisson:
+                    param_dict = {'bG1': params[istart], 'bG2': params[istart+1], 'alpha0': params[istart+2], 'alpha1': params[istart+3], 'alpha2': params[istart+4]}
+                else:
+                    param_dict = {'bG1': params[istart], 'bG2': params[istart+1]}
+                ldtpdf1D = self.tracer_density_pdf(rho=(1 + x), model=bias, matter_norm=matter_norm, **param_dict)
             else:
                 ldtpdf1D = self.density_pdf()
             return ldtpdf1D
@@ -363,13 +394,18 @@ class LDT(BaseClass):
         # mini = minimize(to_min, sigma_init)
         # print(mini)
         # return mini.x
-        
-        if bias == 'linear':
-            p0 = [sigma_init, 1.]
-        elif bias == 'gould':
-            p0 = [sigma_init, 0.7, -1.25]
+
+        if not fix_sigma:
+            p0 = [float(sigma_init)]
         else:
-            p0 = [sigma_init]
+            p0 = []
+        if bias == 'linear':
+            p0 = np.concatenate((p0, [1.]))
+        else:
+            if super_poisson:
+                p0 = np.concatenate((p0, [0.7, -1.25, 1, 0, 0]))
+            else:
+                p0 = np.concatenate((p0, [0.7, -1.25]))
         fit = curve_fit(to_fit, x[mask], y[mask], p0=p0, sigma=err)
         print(fit)
         return fit[0]
