@@ -19,6 +19,8 @@ from densitysplit.lognormal_model import LognormalDensityModel, BiasedLognormalD
 from densitysplit.ldt_model import LDT, LDTDensitySplitModel, setup_logging
 from density_split_corr import compute_lognormal_split_bins
 
+from plot import plot_pdf1D, plot_density_splits
+
 plt.style.use(os.path.join(os.path.abspath('/feynman/home/dphp/mp270220/densitysplit/nb'), 'densitysplit.mplstyle'))
 
 def compute_bias(x, matter_sample, tracer_sample, save_fn=None):
@@ -110,7 +112,7 @@ def plot_bias_relation(x, y, err=None, xlim=None, data='average', data_style=Non
     axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
     axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
     axes[1].yaxis.set_minor_locator(ticker.AutoMinorLocator())
-    axes[0].legend(loc='lower right')
+    axes[0].legend(loc='upper left')
     plt.tight_layout()
     plt.subplots_adjust(hspace=0.1)
     fig.align_ylabels()
@@ -118,71 +120,6 @@ def plot_bias_relation(x, y, err=None, xlim=None, data='average', data_style=Non
     plt.close()
     print('Saved tracer bias plot: {}.'.format(fn))
 
-
-def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absolute', data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, rtitle=False, fn=None):
-
-    if rebin is not None:
-        x = x[::rebin]
-        mean_pdf1D = mean_pdf1D[::rebin]
-        std_pdf1D = std_pdf1D[::rebin]
-
-    if xlim is not None:
-        mask = (x >= xlim[0]) & (x <= xlim[1])
-        x = x[mask]
-        mean_pdf1D = mean_pdf1D[mask]
-        std_pdf1D = std_pdf1D[mask]
-    
-    fig, axes = plt.subplots(2, 1, figsize = (3.5, 3.5), sharex=True, sharey='row', gridspec_kw={'height_ratios': [3, 1]})
-
-    #axes[0].plot(x, mean_pdf1D, label=data_label, **data_style)
-    axes[0].errorbar(x, mean_pdf1D, std_pdf1D, label=data_label, **data_style)
-    if residuals=='absolute':
-        axes[1].fill_between(x, -std_pdf1D, std_pdf1D, facecolor=data_style['color'], alpha=0.3)
-    elif residuals=='sigmas':
-        axes[1].fill_between(x, -1, 1, facecolor=data_style['color'], alpha=0.3)
-    elif residuals=='percent':
-        axes[1].fill_between(x, -std_pdf1D/mean_pdf1D, std_pdf1D/mean_pdf1D, facecolor=data_style['color'], alpha=0.3)
- 
-    if models is not None:
-        for m in models.keys():
-            if rebin is not None:
-                models[m] = models[m][::rebin]
-            if xlim is not None:
-                models[m] = models[m][mask]
-                
-            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m])
-            if residuals=='absolute':
-                axes[1].plot(x, (models[m] - mean_pdf1D), **model_styles[m])
-            elif residuals=='sigmas':
-                axes[1].plot(x, (models[m] - mean_pdf1D)/std_pdf1D, **model_styles[m])
-            elif residuals=='percent':
-                axes[1].plot(x, (models[m] - mean_pdf1D)/mean_pdf1D, **model_styles[m])
-
-    axes[1].ticklabel_format(style='sci', scilimits=(-3, 3))
-    axes[1].set_xlabel(r'$\delta_R$')
-    axes[0].set_ylabel(r'$\mathcal{P}(\delta_R)$')
-
-    if residuals=='absolute':
-        axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R)$')  
-    elif residuals=='sigmas':
-        axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R) / \sigma$') 
-    elif residuals=='percent':
-        axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R) / \mathcal{P}(\delta_R)$')
-
-    axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
-    axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
-    axes[1].yaxis.set_minor_locator(ticker.AutoMinorLocator())
-
-    if rtitle:
-        axes[0].set_title(r'$R = {} \; \mathrm{{Mpc}}/h$'.format(smoothing_radius))
-    axes[0].legend(loc='upper right')
-    plt.rcParams["figure.autolayout"] = False
-    plt.tight_layout()
-    plt.subplots_adjust(hspace=0.15)
-    fig.align_ylabels()
-    plt.savefig(fn, dpi=500)
-    plt.close()
-    print('Saved 1D PDF plot: {}.'.format(fn))
 
 def plot_pdf2D(x, y, mean_hist, cbar_label=None, xlim=None, vmax=None, fn=None):
 
@@ -212,6 +149,58 @@ def plot_pdf2D(x, y, mean_hist, cbar_label=None, xlim=None, vmax=None, fn=None):
     plt.savefig(fn, bbox_inches='tight', dpi=500)
     plt.close()
     print('Saved 2D PDF map plot: {}.'.format(fn))
+
+
+def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, sep=None, rescale_errorbars=1, fn=None):
+
+    if rebin is not None:
+        x = x[::rebin]
+        mean_bias = mean_bias[::rebin]
+        std_bias = std_bias[::rebin]
+
+    if xlim is not None:
+        mask = (x >= xlim[0]) & (x <= xlim[1])
+        x = x[mask]
+        mean_bias = mean_bias[mask]
+        std_bias = std_bias[mask]
+    
+    fig, axes = plt.subplots(2, 1, figsize = (3.5, 3.5), sharex=True, sharey='row', gridspec_kw={'height_ratios': [3, 1]})
+ 
+    #axes[0].plot(x, mean_bias, label=data_label, **data_style)
+    #axes[0].fill_between(x, mean_bias - std_bias, mean_bias + std_bias, facecolor=data_style['color'], alpha=0.3)
+    axes[0].errorbar(x, mean_bias, std_bias/rescale_errorbars, label=data_label, **data_style)
+
+    for m in models.keys():
+        if rebin is not None:
+            models[m] = models[m][::rebin]
+        if xlim is not None:
+            models[m] = models[m][mask]
+
+        axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m], zorder=20)
+        axes[1].plot(x,  (models[m] - mean_bias)/std_bias, **model_styles[m])
+
+    #axes[0].set_ylim(-7, 16)
+    axes[1].set_ylim(-2, 2)
+    axes[0].legend(loc='lower right')
+    axes[1].set_xlabel(r'$\delta_R$')
+    axes[0].set_ylabel(r'$b(\delta_R)$')
+    axes[1].set_ylabel(r'$\Delta b(\delta_R) / \sigma$')
+    #axes[0].set_title(r'$R = {} \; \mathrm{{Mpc}}/h$'.format(smoothing_radius))
+    axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
+    axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    axes[1].yaxis.set_minor_locator(ticker.AutoMinorLocator())
+
+    if sep is not None:
+        axes[0].text(0.1, 0.9, r'$s = {:.0f} \; \mathrm{{Mpc}}/h$'.format(sep), ha='left', va='top', transform = axes[0].transAxes, fontsize=12)
+    
+    fig.align_ylabels()
+    plt.rcParams["figure.autolayout"] = False
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.1)
+    plt.savefig(fn, dpi=500)
+    plt.close()
+    print('Plot saved at {}'.format(fn))
+
 
 
 if __name__ == '__main__':
@@ -247,14 +236,19 @@ if __name__ == '__main__':
                     'ldt_noshotnoise': dict(ls=':', color='C1'),
                     'gaussian': dict(ls='-', color='C1'),
                     'linear': dict(ls=':', color='C3'),
-                    'eulerian': dict(ls='--', color='C3')}        
+                    'eulerian': dict(ls='--', color='C3'),
+                    'poisson': dict(ls=':', color='C1'),
+                    'extended': dict(ls='-', color='C1'),
+ }        
 
     data_label = 'AbacusSummit'
     model_labels = {'ldt': 'LDT',
+                    'poisson': 'Poisson',
+                    'extended': 'non-Poisson',
                     'ldt_noshotnoise': 'LDT (no SN)',
-                    'gaussian': 'Gaussian',
-                    'linear': 'linear',
-                    'eulerian': 'Eulerian'}
+                    'gaussian': 'Gaussian bias',
+                    'linear': 'linear bias',
+                    'eulerian': 'Eulerian  bias'}
 
     # plot settings
     plotting = {'data_style': data_style, 'data_label': data_label, 'model_labels': model_labels, 'model_styles': model_styles}
@@ -401,24 +395,88 @@ if __name__ == '__main__':
     ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + tracer_result.pdf1D_x)*tracer_result.norm)
     ldtbiasmodel = ldtmodel.delta_t_expect(rho=1+matter_result.pdf1D_x, bG1=b1, bG2=b2)
     ldteulerianbiasmodel = ldtmodel.delta_t_expect(rho=1+matter_result.pdf1D_x, bG1=b1E, bG2=b2E, model='eulerian')
-    
     linearbiasmodel = b * matter_result.pdf1D_x
-
     models = {'gaussian': ldtbiasmodel, 'eulerian': ldteulerianbiasmodel}
 
     plot_fname = base_fname.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_bias_relation.pdf'
     plot_bias_relation(matter_result.pdf1D_x, mean_bias_relation, err=std_bias_relation, xlim=xlim, models=models, fn=os.path.join(plots_dir, plot_fname), **plotting)
     
-    plot_fname = base_fname.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_bias_relation_scatter.pdf'
-    plot_bias_relation(matter_result.pdf1D_x, mean_bias_scatter, err=std_bias_scatter, data='scatter', xlim=xlim, fn=os.path.join(plots_dir, plot_fname), **plotting)
+    def fit_shotnoise(delta_m, scatter, err):
+        def to_min(a):
+            y = ldtmodel.alpha(rho=1+delta_m, alpha0=a[0], alpha1=a[1], alpha2=a[2])
+            toret = np.nansum((y - scatter)**2/err**2)
+            return toret
+        p0 = np.array([1, 0, 0])
+        mini = minimize(to_min, x0=p0)
+        print(mini)
+        return mini.x
 
-    ldtpdf1D = ldtmodel.tracer_density_pdf(bG1=b1, bG2=b2, matter_norm=matter_result.norm) 
-    ldtpdf1D_eulerianbias = ldtmodel.tracer_density_pdf(bG1=b1E, bG2=b2E, model='eulerian', matter_norm=matter_result.norm)
+    a0, a1, a2 = fit_shotnoise(matter_result.pdf1D_x[mask], mean_bias_scatter[mask], std_bias_scatter[mask])
+    shotnoise_params = {'alpha0': a0, 'alpha1': a1, 'alpha2': a2}
+
+    shotnoise_model = ldtmodel.alpha(rho=1+matter_result.pdf1D_x, alpha0=a0, alpha1=a1, alpha2=a2)
+    models = {'extended': shotnoise_model}
+
+    plot_fname = base_fname.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_bias_relation_scatter.pdf'
+    plot_bias_relation(matter_result.pdf1D_x, mean_bias_scatter, err=std_bias_scatter, data='scatter', xlim=xlim, models=models, fn=os.path.join(plots_dir, plot_fname), **plotting)
+
+    ldtpdf1D = ldtmodel.tracer_density_pdf(bG1=b1, bG2=b2, **shotnoise_params, matter_norm=matter_result.norm) 
+    ldtpdf1D_eulerianbias = ldtmodel.tracer_density_pdf(bG1=b1E, bG2=b2E, **shotnoise_params, model='eulerian', matter_norm=matter_result.norm)
     ldtpdf1D_linearbias = ldtmodel.density_pdf(b1=b) 
-    models_pdf1D = {'gaussian': ldtpdf1D, 'linear': ldtpdf1D_linearbias, 'eulerian': ldtpdf1D_eulerianbias}
+    models_pdf1D = {'gaussian': ldtpdf1D, 'eulerian': ldtpdf1D_eulerianbias}
 
     # Plot 1D PDF
     density_name = tracer_sim_name + '_cellsize{:d}_resampler{}{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '', '_rsd' if args.rsd else '')
     plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF.pdf'
     
-    plot_pdf1D(tracer_result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=(-1, 3), models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
+    plot_pdf1D(tracer_result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=(-1, 4), models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
+
+    # Bias function
+    for sep in tracer_result.bias_function.keys():
+        if float(sep) in [5, 10, 20, 40, 70, 110]:
+            # Mocks
+            mean_bias = np.mean(tracer_result.bias_function[sep], axis=0)
+            std_bias = np.std(tracer_result.bias_function[sep], axis=0)
+
+            xiR_matter = np.mean(matter_result.bias_corr[sep])
+            xiR_tracer = np.mean(tracer_result.bias_corr[sep])
+            print('xi ratio:', xiR_matter/xiR_tracer)
+       
+            # LDT model
+            ldtbiasmodel = ldtmodel.tracer_bias(rho=1+tracer_result.bias_function_x[sep], bG1=b1, bG2=b2, **shotnoise_params, xi_ratio=1, model='gaussian')*np.sqrt(xiR_matter/xiR_tracer)
+            ldtbiasmodel_eulerianbias = ldtmodel.tracer_bias(rho=1+tracer_result.bias_function_x[sep], bG1=b1E, bG2=b2E, **shotnoise_params, xi_ratio=1, model='eulerian')*np.sqrt(xiR_matter/xiR_tracer)
+            models_bias = {'gaussian': ldtbiasmodel, 'eulerian': ldtbiasmodel_eulerianbias}
+    
+            # Plot bias function
+            plot_name = tracer_base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
+            plot_bias_function(tracer_result.bias_function_x[sep], mean_bias, std_bias, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
+
+    # Density splits
+    try:
+        matter_xiR = np.mean([res(ells=ells, ignore_nan=True) for res in matter_result.smoothed_corr], axis=0)
+    except:
+        matter_xiR = np.mean(matter_result.smoothed_corr, axis=0)
+    tracer_xiR = np.mean([res(ignore_nan=True) for res in tracer_result.smoothed_corr], axis=0)
+    mean_ds, cov = get_split_poles(tracer_result.ds_corr, ells=None if (not args.rsd) else ells)
+    std_ds = np.nan if cov.size == 1 else np.array_split(np.array(np.array_split(np.diag(cov)**0.5, nells)), args.nsplits, axis=1)
+    sep = tracer_result.sep
+
+    std_ds_desi = None
+
+    # LDT model
+    ldtdsplitmodel = LDTDensitySplitModel(ldtmodel, density_bins=tracer_result.bins)
+    ldtdsplits_gaussian = ldtdsplitmodel.compute_dsplits(np.sqrt(matter_xiR/tracer_xiR)*tracer_xiR, bias_model='gaussian', bG1=b1, bG2=b2, **shotnoise_params)
+    ldtdsplits_eulerian = ldtdsplitmodel.compute_dsplits(np.sqrt(matter_xiR/tracer_xiR)*tracer_xiR, bias_model='eulerian', bG1=b1E, bG2=b2E, **shotnoise_params)
+    
+    models_ds = {'gaussian': ldtdsplits_gaussian, 'eulerian': ldtdsplits_eulerian}
+
+    seps = np.array([float(s) for s in tracer_result.hist2D.keys()])
+
+    for m in ['gaussian', 'eulerian']:
+        plot_name = tracer_base_name.format('{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_{:d}densitysplits_LDT_{}biasmodel.pdf'.format(args.nsplits, m)
+        models = {m: models_ds[m]}
+
+        plot_density_splits(sep, mean_ds, std_ds, std_ds_ref=std_ds_desi, models=models, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
+
+    
+    
