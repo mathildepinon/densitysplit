@@ -207,8 +207,11 @@ class LDT(BaseClass):
                     k=self.kvals
                 return func(k) * norm # k may not be flat
 
-    def alpha(self, alpha0=1, alpha1=0, alpha2=0):
-        x = self.yvals[self.yvals < self.ymax]
+    def alpha(self, rho=None, alpha0=1, alpha1=0, alpha2=0):
+        if rho is not None:
+            x = rho
+        else:
+            x = self.yvals[self.yvals < self.ymax]
         delta_m = x - 1
         return alpha0 + alpha1 * delta_m + alpha2 * delta_m**2
 
@@ -249,7 +252,7 @@ class LDT(BaseClass):
         return toret
 
     def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0, model='gaussian', matter_norm=None):
-        alpha = self.alpha(alpha0, alpha1, alpha2)[:, None]
+        alpha = self.alpha(alpha0=alpha0, alpha1=alpha1, alpha2=alpha2)[:, None]
         Nt_expect = self.norm * (1 + self.delta_t_expect(bG1=bG1, bG2=bG2, model=model)[:, None])
         mask0 = (Nt_expect[:, 0] <= 0)
         logpdf = - np.log(alpha) - Nt_expect/alpha - loggamma(1+Nt/alpha) + Nt[None, :]/alpha * np.log(Nt_expect/alpha)
@@ -327,28 +330,27 @@ class LDT(BaseClass):
             return func(k) * norm / density_pdfvals
 
     # bias function with bias and shot noise model from Gould et al 2024
-    def tracer_bias(self, rho=None, **kwargs):
+    def tracer_bias(self, rho=None, xi_ratio=1, **kwargs):
         ymax = self.ymax
         mask = self.yvals < ymax
         x = self.yvals[mask]
         norm = self.norm
         bias_func = self.bias_noshotnoise(x)
         density_pdfvals_noshotnoise = self.density_pdf_noshotnoise(x)
-        print('pdf no shot noise:', density_pdfvals_noshotnoise)
+        #print('pdf no shot noise:', density_pdfvals_noshotnoise)
         prod = bias_func*density_pdfvals_noshotnoise
         density_pdfvals = self.tracer_density_pdf(rho=rho, **kwargs)
         def func(N):
             Nt_pdf = self.Nt_pdf(N, **kwargs)
-            print('Nt_pdf', Nt_pdf)
             res = np.trapz(Nt_pdf * prod[:, None], x=x, axis=0)
             return res
         if (self.kvals is None) and (rho is not None):
             k = np.round(norm * rho)
             k = np.append(k, np.max(k)+1)
-            return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm / density_pdfvals
+            return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm / density_pdfvals * xi_ratio
         else:
             k=self.kvals
-            return func(k) * norm / density_pdfvals
+            return func(k) * norm / density_pdfvals * xi_ratio
 
     def fit_from_pdf(self, x, y, err=None, sigma_init=1., fix_sigma=True, bias=None, norm=None, super_poisson=True, matter_norm=None, xlim=None):
         mask = (x >= -1) & (x < np.inf)
@@ -511,7 +513,7 @@ class LDTDensitySplitModel(LDT):
         res = alpha * self.joint_density_pdf_nonorm(xi, beta*rho1, beta*rho2, **kwargs)
         return res
 
-    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None, density_pdf=None, bias=None, bias_model='gould', **kwargs):
+    def compute_dsplits(self, xi, nsplits=None, density_bins=None, x=None, density_pdf=None, bias=None, bias_model=None, **kwargs):
         if nsplits is not None:
             self.nsplits = nsplits
         if density_bins is not None:
@@ -529,13 +531,13 @@ class LDTDensitySplitModel(LDT):
         t0 = time.time()
         dsplits = list()
         if density_pdf is None:
-            if bias_model=='gould':
-                density_pdf = self.tracer_density_pdf(xvals, **kwargs)
+            if bias_model in ['gaussian', 'eulerian']:
+                density_pdf = self.tracer_density_pdf(xvals, model=bias_model, **kwargs)
             else:
                 density_pdf = self.density_pdf(xvals, **kwargs)
         if bias is None:
-            if bias_model=='gould':
-                bias = self.tracer_bias(rho=xvals, **kwargs)/(1+kwargs['bG1'])
+            if bias_model in ['gaussian', 'eulerian']:
+                bias = self.tracer_bias(rho=xvals, model=bias_model, **kwargs)
             else:
                 bias = self.bias(rho=xvals, **kwargs)
         print('bias shape: ', bias.shape)
