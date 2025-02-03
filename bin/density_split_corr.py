@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('--imock', type=int, required=False, default=0)
     parser.add_argument('--redshift', type=float, required=False, default=None)
     parser.add_argument('--simulation', type=str, required=False, default='abacus', choices=['abacus', 'gaussian', 'lognormal'])
-    parser.add_argument('--tracer', type=str, required=False, default='particles', choices=['particles', 'halos'])
+    parser.add_argument('--tracer', type=str, required=False, default='particles', choices=['particles', 'halos', 'ELG', 'LRG'])
     parser.add_argument('--nbar', type=float, required=False, default=0.0034)
     parser.add_argument('--cellsize', type=int, required=False, default=10)
     parser.add_argument('--cellsize2', type=int, required=False, default=None)
@@ -48,16 +48,20 @@ if __name__ == '__main__':
     parser.add_argument('--los', type=str, required=False, default='x')
     parser.add_argument('--nsplits', type=int, required=False, default=3)
     parser.add_argument('--randoms_size', type=int, required=False, default=4)
+    parser.add_argument('--downsample', type=float, required=False, default=1)
+    parser.add_argument('--nthreads', type=int, required=False, default=32)
     
     args = parser.parse_args()
 
     z = args.redshift
     
+    if args.rsd:
     # Edges (s, mu) to compute correlation function at
-    mode = 'smu'
-    edges = (np.linspace(0., 150., 51), np.linspace(-1, 1, 201))
-    #mode = 's'
-    #edges = np.linspace(0., 150., 51)
+        mode = 'smu'
+        edges = (np.linspace(0., 150., 51), np.linspace(-1, 1, 201))
+    else:
+        mode = 's'
+        edges = np.linspace(0., 150., 51)
 
     if args.simulation == 'abacus':
         cosmology=fiducial.AbacusSummitBase()
@@ -71,6 +75,10 @@ if __name__ == '__main__':
         elif args.tracer == 'particles':
             simname0 = 'AbacusSummit_2Gpc_z{:.3f}_ph0{{:02d}}_downsampled_particles_nbar{:.4f}'.format(z, args.nbar)
             simname = simname0.format(args.imock)
+        elif args.tracer in ['ELG', 'LRG']:
+            #simname0 = 'AbacusSummit_1Gpc_z0.8-1.1_{}'.format(args.tracer)
+            simname0 = 'AbacusSummit_2Gpc_{}_z{:.3f}_ph0{{:02d}}'.format(args.tracer, z)
+            simname = simname0.format(args.imock)
 
         cosmology = fiducial.AbacusSummitBase()
         bg = cosmology.get_background()
@@ -78,21 +86,34 @@ if __name__ == '__main__':
 
         # compute density contrast
         mock = catalog_data.Data.load(os.path.join(datadir, simname+'.npy'))
+        if args.downsample != 1:
+            print('Downsample catalog by {}'.format(args.downsample))
+            mock.downsample(factor=args.downsample)
+
+        nbar = mock.size / mock.boxsize**3
+        print('nbar = {}'.format(nbar))
+        
         mock_density = density_split.DensitySplit(mock)
         mock_density.compute_density(data=mock, cellsize=args.cellsize, resampler=args.resampler, smoothing_radius=args.smoothing_radius, cellsize2=args.cellsize2, smoothing_radius2=args.smoothing_radius2, use_rsd=args.rsd, los=args.los, hz=hz, use_weights=args.use_weights, return_counts=True)
 
+        if (args.downsample != 1) & (args.tracer == 'particles'):
+            simname0 = 'AbacusSummit_2Gpc_z{:.3f}_ph0{{:02d}}_downsampled_particles_nbar{:.4f}'.format(z, nbar)
+            simname = simname0.format(args.imock)
+
         if args.resampler!='tophat':
-            density_fn = os.path.join('/feynman/scratch/dphp/mp270220/outputs', simname + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '') + '_density_mesh{}'.format('_RSD' if args.rsd else ''))
+            density_fn = os.path.join('/feynman/scratch/dphp/mp270220/outputs', simname + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '') + '_density_mesh{}'.format('_rsd' if args.rsd else ''))
             mock_density.save_mesh(density_fn)
 
         if 'density' in args.todo:
             if args.resampler=='tophat':
-                from densitysplit.cic_density import compute_cic_density
                 delta_R = mock_density.readout_density(positions='mesh', resampler=args.resampler)
-                outputname = simname + '_cellsize{:d}_resampler{}{}_N{}'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_RSD' if args.rsd else '')
+                if args.imock==0:
+                    nbar0 = mock_density.size/mock_density.boxsize**3
+                    np.save(os.path.join('/feynman/work/dphp/mp270220/outputs/density', simname + '_nbar'), nbar0) 
+                outputname = simname + '_cellsize{:d}_resampler{}{}_N{}'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_rsd' if args.rsd else '')
             else:
                 delta_R = mock_density.readout_density(positions='randoms', resampler=args.resampler, seed=args.imock)
-                outputname = simname + '_cellsize{:d}_resampler{}{}_delta_R{}'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_RSD' if args.rsd else '')
+                outputname = simname + '_cellsize{:d}_resampler{}{}_delta_R{}'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_rsd' if args.rsd else '')
             print('Save density at: {}'.format(os.path.join('/feynman/work/dphp/mp270220/outputs/density', outputname)))
             np.save(os.path.join('/feynman/work/dphp/mp270220/outputs/density', outputname), delta_R)
 
@@ -100,11 +121,11 @@ if __name__ == '__main__':
             # compute density splits
             # define split bins
             if args.resampler=='tophat':
-                delta0name = simname0.format(0) + '_cellsize{:d}_resampler{}{}_N{}.npy'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_RSD' if args.rsd else '')
-                nbar = args.nbar
-                norm = nbar * 4/3 * np.pi * args.smoothing_radius**3
+                delta0name = simname0.format(0) + '_cellsize{:d}_resampler{}{}_N{}.npy'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_rsd' if args.rsd else '')
+                nbar0 = np.load(os.path.join('/feynman/work/dphp/mp270220/outputs/density', simname0.format(0) + '_nbar.npy')) 
+                norm = nbar0 * 4/3 * np.pi * args.smoothing_radius**3
             else:
-                delta0name = simname0.format(0) + '_cellsize{:d}_resampler{}{}_delta_R{}.npy'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_RSD' if args.rsd else '')
+                delta0name = simname0.format(0) + '_cellsize{:d}_resampler{}{}_delta_R{}.npy'.format(args.cellsize, args.resampler, '_smoothingR{:02d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', '_rsd' if args.rsd else '')
                 norm = None
             f = os.path.join('/feynman/work/dphp/mp270220/outputs/density', delta0name)
             if os.path.isfile(f):
@@ -130,15 +151,18 @@ if __name__ == '__main__':
             else:
                 weights = None
     
-            mock_density.compute_smoothed_corr(edges, positions2=positions, weights2=weights, seed=args.imock, los=args.los, nthreads=32, norm=norm, mode=mode)
-            mock_density.compute_ds_data_corr(edges, positions2=positions, weights2=weights, seed=args.imock, randoms_size=args.randoms_size, los=args.los, nthreads=32, norm=norm, mode=mode)
+            mock_density.compute_smoothed_corr(edges, positions2=positions, weights2=weights, seed=args.imock, los=args.los, nthreads=args.nthreads, norm=norm, mode=mode)
+            mock_density.compute_ds_data_corr(edges, positions2=positions, weights2=weights, seed=args.imock, randoms_size=args.randoms_size, los=args.los, nthreads=args.nthreads, norm=norm, mode=mode)
 
-            # save result
-            if args.env == 'feynman':
-                outputdir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
-            elif args.env == 'nersc':
-                outputdir = '/pscratch/sd/m/mpinon/abacus/densitysplit'
-            outputname = simname + '_cellsize{:d}{}_resampler{}{}_{:d}splits_randoms_size{:d}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', args.nsplits, args.randoms_size) + '_RH_CCF{}'.format('_RSD' if args.rsd else '')
-            mock_density.save(os.path.join(outputdir, outputname), save_density_mesh=(args.resampler=='tophat'))
-            print('DensitySplit saved at: {}'.format(os.path.join(outputdir, outputname)))
+        # save result
+        if args.env == 'feynman':
+            #outputdir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
+            outputdir = '/feynman/scratch/dphp/mp270220/outputs/densitysplit/'
+        elif args.env == 'nersc':
+            outputdir = '/pscratch/sd/m/mpinon/abacus/densitysplit'
+        
+        outputname = simname + '_cellsize{:d}{}_resampler{}{}_{:d}splits_randoms_size{:d}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '', args.nsplits, args.randoms_size) + '_RH_CCF{}'.format('_rsd' if args.rsd else '')
+        
+        mock_density.save(os.path.join(outputdir, outputname), save_density_mesh=(args.resampler=='tophat'))
+        print('DensitySplit saved at: {}'.format(os.path.join(outputdir, outputname)))
         

@@ -19,9 +19,10 @@ from densitysplit.lognormal_model import LognormalDensityModel, BiasedLognormalD
 from densitysplit.ldt_model import LDT, LDTDensitySplitModel, setup_logging
 from density_split_corr import compute_lognormal_split_bins
 
-from plot import plot_pdf1D, plot_density_splits
+from plot import plot_pdf1D, plot_bias_function, plot_density_splits
 
 plt.style.use(os.path.join(os.path.abspath('/feynman/home/dphp/mp270220/densitysplit/nb'), 'densitysplit.mplstyle'))
+
 
 def compute_bias(x, matter_sample, tracer_sample, save_fn=None):
     tracer_bias = list()
@@ -80,7 +81,7 @@ def compute_joint_pdf(matter_edges, tracer_edges, matter_sample, tracer_sample, 
     return np.array(hist2D)
 
 
-def plot_bias_relation(x, y, err=None, xlim=None, data='average', data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, fn=None):
+def plot_bias_relation(x, y, err=None, xlim=None, data='average', rescale_errorbars=1, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, fn=None):
 
     if xlim is not None:
         mask = (x >= xlim[0]) & (x <= xlim[1])
@@ -91,28 +92,33 @@ def plot_bias_relation(x, y, err=None, xlim=None, data='average', data_style=Non
     
     fig, axes = plt.subplots(2, 1, figsize = (3.5, 3.5), sharex=True, sharey='row', gridspec_kw={'height_ratios': [3, 1]})
 
-    axes[0].errorbar(x, y, err, label=data_label, **data_style)
+    axes[0].errorbar(x, y, err//rescale_errorbars, label=data_label, **data_style)
 
     if models is not None:
         for m in models.keys():
             if xlim is not None:
                 models[m] = models[m][mask]
                 
-            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m])
+            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m], zorder=10 if data=='average' else 0)
             axes[1].plot(x, (models[m] - y)/err, **model_styles[m])
 
     axes[1].ticklabel_format(style='sci', scilimits=(-3, 3))
+    axes[1].set_ylim((-5.4, 5.4))
     axes[1].set_xlabel(r'$\delta_{R, m}$')
     if data=='average':
         axes[0].set_ylabel(r'$\langle \delta_{R, g} | \delta_{R, m} \rangle$')
         axes[1].set_ylabel(r'$\Delta \langle \delta_{R, g} | \delta_{R, m} \rangle / \sigma$')
     elif data=='scatter':
-        axes[0].set_ylabel(r'$\bar{N_g} \frac{ \langle \delta_{R, g}^2 | \delta_{R, m} \rangle } {1 + \langle \delta_{R, g} | \delta_{R, m} \rangle}$')
-        axes[1].set_ylabel(r'$\Delta / \sigma$')
+        #axes[0].set_ylabel(r'$\bar{N_g} \frac{ \langle \delta_{R, g}^2 | \delta_{R, m} \rangle } {1 + \langle \delta_{R, g} | \delta_{R, m} \rangle}$')
+        axes[0].set_ylabel(r'$\alpha(\delta_{R, m})$')
+        axes[1].set_ylabel(r'$\Delta \alpha(\delta_{R, m}) / \sigma$')
     axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
     axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
     axes[1].yaxis.set_minor_locator(ticker.AutoMinorLocator())
-    axes[0].legend(loc='upper left')
+    if data=='average':
+        axes[0].legend(loc='lower right')
+    elif data=='scatter':
+        axes[0].legend(loc='upper left')
     plt.tight_layout()
     plt.subplots_adjust(hspace=0.1)
     fig.align_ylabels()
@@ -149,58 +155,6 @@ def plot_pdf2D(x, y, mean_hist, cbar_label=None, xlim=None, vmax=None, fn=None):
     plt.savefig(fn, bbox_inches='tight', dpi=500)
     plt.close()
     print('Saved 2D PDF map plot: {}.'.format(fn))
-
-
-def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, sep=None, rescale_errorbars=1, fn=None):
-
-    if rebin is not None:
-        x = x[::rebin]
-        mean_bias = mean_bias[::rebin]
-        std_bias = std_bias[::rebin]
-
-    if xlim is not None:
-        mask = (x >= xlim[0]) & (x <= xlim[1])
-        x = x[mask]
-        mean_bias = mean_bias[mask]
-        std_bias = std_bias[mask]
-    
-    fig, axes = plt.subplots(2, 1, figsize = (3.5, 3.5), sharex=True, sharey='row', gridspec_kw={'height_ratios': [3, 1]})
- 
-    #axes[0].plot(x, mean_bias, label=data_label, **data_style)
-    #axes[0].fill_between(x, mean_bias - std_bias, mean_bias + std_bias, facecolor=data_style['color'], alpha=0.3)
-    axes[0].errorbar(x, mean_bias, std_bias/rescale_errorbars, label=data_label, **data_style)
-
-    for m in models.keys():
-        if rebin is not None:
-            models[m] = models[m][::rebin]
-        if xlim is not None:
-            models[m] = models[m][mask]
-
-        axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m], zorder=20)
-        axes[1].plot(x,  (models[m] - mean_bias)/std_bias, **model_styles[m])
-
-    #axes[0].set_ylim(-7, 16)
-    axes[1].set_ylim(-2, 2)
-    axes[0].legend(loc='lower right')
-    axes[1].set_xlabel(r'$\delta_R$')
-    axes[0].set_ylabel(r'$b(\delta_R)$')
-    axes[1].set_ylabel(r'$\Delta b(\delta_R) / \sigma$')
-    #axes[0].set_title(r'$R = {} \; \mathrm{{Mpc}}/h$'.format(smoothing_radius))
-    axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
-    axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
-    axes[1].yaxis.set_minor_locator(ticker.AutoMinorLocator())
-
-    if sep is not None:
-        axes[0].text(0.1, 0.9, r'$s = {:.0f} \; \mathrm{{Mpc}}/h$'.format(sep), ha='left', va='top', transform = axes[0].transAxes, fontsize=12)
-    
-    fig.align_ylabels()
-    plt.rcParams["figure.autolayout"] = False
-    plt.tight_layout()
-    plt.subplots_adjust(hspace=0.1)
-    plt.savefig(fn, dpi=500)
-    plt.close()
-    print('Plot saved at {}'.format(fn))
-
 
 
 if __name__ == '__main__':
@@ -244,7 +198,7 @@ if __name__ == '__main__':
     data_label = 'AbacusSummit'
     model_labels = {'ldt': 'LDT',
                     'poisson': 'Poisson',
-                    'extended': 'non-Poisson',
+                    'extended': 'fit',
                     'ldt_noshotnoise': 'LDT (no SN)',
                     'gaussian': 'Gaussian bias',
                     'linear': 'linear bias',
@@ -399,7 +353,7 @@ if __name__ == '__main__':
     models = {'gaussian': ldtbiasmodel, 'eulerian': ldteulerianbiasmodel}
 
     plot_fname = base_fname.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_bias_relation.pdf'
-    plot_bias_relation(matter_result.pdf1D_x, mean_bias_relation, err=std_bias_relation, xlim=xlim, models=models, fn=os.path.join(plots_dir, plot_fname), **plotting)
+    plot_bias_relation(matter_result.pdf1D_x, mean_bias_relation, err=std_bias_relation, rescale_errorbars=np.sqrt(nmocks), xlim=xlim, models=models, fn=os.path.join(plots_dir, plot_fname), **plotting)
     
     def fit_shotnoise(delta_m, scatter, err):
         def to_min(a):
@@ -418,7 +372,7 @@ if __name__ == '__main__':
     models = {'extended': shotnoise_model}
 
     plot_fname = base_fname.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_bias_relation_scatter.pdf'
-    plot_bias_relation(matter_result.pdf1D_x, mean_bias_scatter, err=std_bias_scatter, data='scatter', xlim=xlim, models=models, fn=os.path.join(plots_dir, plot_fname), **plotting)
+    plot_bias_relation(matter_result.pdf1D_x, mean_bias_scatter, err=std_bias_scatter, data='scatter', rescale_errorbars=np.sqrt(nmocks), xlim=xlim, models=models, fn=os.path.join(plots_dir, plot_fname), **plotting)
 
     ldtpdf1D = ldtmodel.tracer_density_pdf(bG1=b1, bG2=b2, **shotnoise_params, matter_norm=matter_result.norm) 
     ldtpdf1D_eulerianbias = ldtmodel.tracer_density_pdf(bG1=b1E, bG2=b2E, **shotnoise_params, model='eulerian', matter_norm=matter_result.norm)
@@ -429,7 +383,7 @@ if __name__ == '__main__':
     density_name = tracer_sim_name + '_cellsize{:d}_resampler{}{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '', '_rsd' if args.rsd else '')
     plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF.pdf'
     
-    plot_pdf1D(tracer_result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=(-1, 4), models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
+    plot_pdf1D(tracer_result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=(-1, 4), models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), galaxies=True, **plotting)
 
     # Bias function
     for sep in tracer_result.bias_function.keys():
@@ -443,13 +397,13 @@ if __name__ == '__main__':
             print('xi ratio:', xiR_matter/xiR_tracer)
        
             # LDT model
-            ldtbiasmodel = ldtmodel.tracer_bias(rho=1+tracer_result.bias_function_x[sep], bG1=b1, bG2=b2, **shotnoise_params, xi_ratio=1, model='gaussian')*np.sqrt(xiR_matter/xiR_tracer)
-            ldtbiasmodel_eulerianbias = ldtmodel.tracer_bias(rho=1+tracer_result.bias_function_x[sep], bG1=b1E, bG2=b2E, **shotnoise_params, xi_ratio=1, model='eulerian')*np.sqrt(xiR_matter/xiR_tracer)
+            ldtbiasmodel = ldtmodel.tracer_bias(rho=1+tracer_result.bias_function_x[sep], bG1=b1, bG2=b2, **shotnoise_params, model='gaussian')*np.sqrt(xiR_matter/xiR_tracer)
+            ldtbiasmodel_eulerianbias = ldtmodel.tracer_bias(rho=1+tracer_result.bias_function_x[sep], bG1=b1E, bG2=b2E, **shotnoise_params, model='eulerian')*np.sqrt(xiR_matter/xiR_tracer)
             models_bias = {'gaussian': ldtbiasmodel, 'eulerian': ldtbiasmodel_eulerianbias}
     
             # Plot bias function
             plot_name = tracer_base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
-            plot_bias_function(tracer_result.bias_function_x[sep], mean_bias, std_bias, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
+            plot_bias_function(tracer_result.bias_function_x[sep], mean_bias, std_bias, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), galaxies=True, **plotting)
 
     # Density splits
     try:
@@ -465,8 +419,8 @@ if __name__ == '__main__':
 
     # LDT model
     ldtdsplitmodel = LDTDensitySplitModel(ldtmodel, density_bins=tracer_result.bins)
-    ldtdsplits_gaussian = ldtdsplitmodel.compute_dsplits(np.sqrt(matter_xiR/tracer_xiR)*tracer_xiR, bias_model='gaussian', bG1=b1, bG2=b2, **shotnoise_params)
-    ldtdsplits_eulerian = ldtdsplitmodel.compute_dsplits(np.sqrt(matter_xiR/tracer_xiR)*tracer_xiR, bias_model='eulerian', bG1=b1E, bG2=b2E, **shotnoise_params)
+    ldtdsplits_gaussian = ldtdsplitmodel.compute_dsplits(matter_xiR, bias_model='gaussian', bG1=b1, bG2=b2, **shotnoise_params)
+    ldtdsplits_eulerian = ldtdsplitmodel.compute_dsplits(matter_xiR, bias_model='eulerian', bG1=b1E, bG2=b2E, **shotnoise_params)
     
     models_ds = {'gaussian': ldtdsplits_gaussian, 'eulerian': ldtdsplits_eulerian}
 

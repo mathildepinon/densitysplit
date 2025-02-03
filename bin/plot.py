@@ -20,7 +20,7 @@ from density_split_corr import compute_lognormal_split_bins
 plt.style.use(os.path.join(os.path.abspath('/feynman/home/dphp/mp270220/densitysplit/nb'), 'densitysplit.mplstyle'))
 
 
-def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absolute', data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, rtitle=False, fn=None):
+def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absolute', data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, rtitle=False, galaxies=False, fn=None):
 
     if rebin is not None:
         x = x[::rebin]
@@ -60,15 +60,17 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absol
                 axes[1].plot(x, (models[m] - mean_pdf1D)/mean_pdf1D, **model_styles[m])
 
     axes[1].ticklabel_format(style='sci', scilimits=(-3, 3))
-    axes[1].set_xlabel(r'$\delta_R$')
-    axes[0].set_ylabel(r'$\mathcal{P}(\delta_R)$')
+    dlabel = '\delta_{R,g}' if galaxies else '\delta_{R}'
+    plabel = ''
+    axes[1].set_xlabel(r'${}$'.format(dlabel))
+    axes[0].set_ylabel(r'$\mathcal{{P}}{}({})$'.format(plabel, dlabel))
 
     if residuals=='absolute':
-        axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R)$')  
+        axes[1].set_ylabel(r'$\Delta \mathcal{{P}}{}({})$'.format(plabel, dlabel))
     elif residuals=='sigmas':
-        axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R) / \sigma$') 
+        axes[1].set_ylabel(r'$\Delta \mathcal{{P}}{}({}) / \sigma$'.format(plabel, dlabel)) 
     elif residuals=='percent':
-        axes[1].set_ylabel(r'$\Delta \mathcal{P}(\delta_R) / \mathcal{P}(\delta_R)$')
+        axes[1].set_ylabel(r'$\Delta \mathcal{{P}}{}({}) / \mathcal{{P}}{}({})$'.format(plabel, dlabel, plabel, dlabel))
 
     axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
     axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
@@ -193,7 +195,7 @@ def plot_pdf1D_cov(x, pdf1D, xlim=None, rebin=None, rtitle=False, fn=None):
     print('Saved 1D PDF covariance: {}.'.format(fn))
 
 
-def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, sep=None, rescale_errorbars=1, fn=None):
+def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style=None, data_label=None, models=None, model_labels=None, model_styles=None, sep=None, rescale_errorbars=1, galaxies=False, fn=None):
 
     if rebin is not None:
         x = x[::rebin]
@@ -219,14 +221,16 @@ def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style
             models[m] = models[m][mask]
 
         axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m], zorder=20)
-        axes[1].plot(x,  (models[m] - mean_bias)/std_bias, **model_styles[m])
+        axes[1].plot(x, (models[m] - mean_bias)/std_bias, **model_styles[m])
 
     #axes[0].set_ylim(-7, 16)
     axes[1].set_ylim(-2, 2)
     axes[0].legend(loc='lower right')
-    axes[1].set_xlabel(r'$\delta_R$')
-    axes[0].set_ylabel(r'$b(\delta_R)$')
-    axes[1].set_ylabel(r'$\Delta b(\delta_R) / \sigma$')
+    dlabel = '\delta_{R,g}' if galaxies else '\delta_{R}'
+    plabel = ''
+    axes[1].set_xlabel(r'${}$'.format(dlabel))
+    axes[0].set_ylabel(r'$b{}({})$'.format(plabel, dlabel))
+    axes[1].set_ylabel(r'$\Delta b{}({}) / \sigma$'.format(plabel, dlabel))
     #axes[0].set_title(r'$R = {} \; \mathrm{{Mpc}}/h$'.format(smoothing_radius))
     axes[0].xaxis.set_minor_locator(ticker.AutoMinorLocator())
     axes[0].yaxis.set_minor_locator(ticker.AutoMinorLocator())
@@ -499,7 +503,7 @@ if __name__ == '__main__':
 
     bias_model = None
     if args.tracer in ['ELG', 'LRG']:
-        bias_model = 'gould'
+        bias_model = 'linear'
 
     for smoothing_radius in args.smoothing_radius:       
         base_name = sim_name + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '')
@@ -577,45 +581,16 @@ if __name__ == '__main__':
         ldtmodel = LDT(redshift=z, smoothing_scale=smoothing_radius, smoothing_kernel=1, nbar=nbar)
         ldtmodel.interpolate_sigma()
 
-        if (args.tracer=='ELG') & (z==0.8):
-            sigma_noshotnoise = np.load('/feynman/scratch/dphp/mp270220/outputs/ldt_sigma_fit.npy')
-
         # Fit variance and/or bias
-        super_poisson = False
-        fix_sigma = True
         if bias_model=='linear':
-            if fix_sigma:
-                b1 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm)
-            else:
-                sigma_noshotnoise, b1 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm)               
+            sigma_noshotnoise, b1 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm)               
             print('fitted b1:', b1)
-        elif bias_model=='gould':
-            if super_poisson:
-                if fix_sigma:
-                    b1, b2, a0, a1, a2 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm, super_poisson=super_poisson)
-                else:
-                    sigma_noshotnoise, b1, b2, a0, a1, a2 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm, super_poisson=super_poisson)
-                bias_params = {'bG1': b1, 'bG2': b2, 'alpha0':a0, 'alpha1': a1, 'alpha2': a2}
-            else:
-                if fix_sigma:
-                    b1, b2 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm, super_poisson=super_poisson)
-                else:
-                    sigma_noshotnoise, b1, b2 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm, super_poisson=super_poisson)
-                bias_params = {'bG1': b1, 'bG2': b2}
-            print('fitted bias params:', bias_params)
         else:
             sigma_noshotnoise = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, sigma_init=sigma_noshotnoise, norm=norm)
             #sigma_noshotnoise = ldtmodel.fit_from_sample(N_sample, sigma_ini=sigma_noshotnoise)
             b1 = 1
         print('fitted sigma no shotnoise:', sigma_noshotnoise)
         #np.save('/feynman/scratch/dphp/mp270220/outputs/ldt_sigma_fit', sigma_noshotnoise)
-
-        # ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + result.pdf1D_x)*norm)
-        # x = ldtmodel.yvals[ldtmodel.yvals < ldtmodel.ymax]
-        # delta_t = ldtmodel.delta_t_expect(bG1=1.5, bG2=-0.3)
-        # mask = x < 2
-        # plt.plot(x[mask], 1+delta_t[mask])
-        # plt.savefig(os.path.join(plots_dir, 'gould_bias_model_test.pdf'), dpi=500)
     
         if args.resampler=='tophat':
             if interpolate:
@@ -623,10 +598,7 @@ if __name__ == '__main__':
                 ldtpdf1D = ldtmodel.density_pdf(1+result.pdf1D_x, b1=b1)
             else:
                 ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + result.pdf1D_x)*norm)
-                if bias_model == 'gould':
-                    ldtpdf1D = ldtmodel.tracer_density_pdf(**bias_params) 
-                else:
-                    ldtpdf1D = ldtmodel.density_pdf(b1=b1)
+                ldtpdf1D = ldtmodel.density_pdf(b1=b1)
             if 'shotnoise' in args.to_plot:
                 x = ldtmodel.yvals[ldtmodel.yvals < ldtmodel.ymax]
                 ldtpdf1D_noshotnoise = ldtmodel.density_pdf_noshotnoise(rho=x, b1=b1)   
@@ -649,10 +621,7 @@ if __name__ == '__main__':
         col3 = [r'${:.4g}$'.format(c[0]) for c in lognormal_cumulants.values()]
         print_table_latex(rownames, col1, col2, col3, col_labels)
      
-        if bias_model is not None:
-            models_pdf1D = {'ldt': ldtpdf1D}
-        else:
-            models_pdf1D = {'ldt': ldtpdf1D, 'lognormal': lognormalpdf1D}
+        models_pdf1D = {'ldt': ldtpdf1D, 'lognormal': lognormalpdf1D}
     
         # plot settings
         plotting = {'data_style': data_style, 'data_label': data_label, 'model_labels': model_labels, 'model_styles': model_styles}
@@ -812,7 +781,7 @@ if __name__ == '__main__':
         if 'densitysplits' in args.to_plot:
             # Density splits
             try:
-                mean_xiR = np.mean([res(ells=ells, ignore_nan=True) for res in result.smoothed_corr], axis=0)
+                mean_xiR = np.mean([res(ells=ells if args.rsd else None, ignore_nan=True) for res in result.smoothed_corr], axis=0)
             except:
                 mean_xiR = np.mean(result.smoothed_corr, axis=0)
             mean_ds, cov = get_split_poles(result.ds_corr, ells=None if (args.resampler=='tophat') & (not args.rsd) else ells)
@@ -840,10 +809,7 @@ if __name__ == '__main__':
             #mean_bias_interp = interp1d(seps, mean_bias_allseps, axis=0)(sep)
             #print('bias shape: ', mean_bias_interp.T.shape)
             #ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, b1=b1, bias=mean_bias_allseps.T[:, seps==20], density_pdf=None)
-            if bias_model=='gould':
-                ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, bias_model=bias_model, **bias_params)
-            else:
-                ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, b1=b1)
+            ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, b1=b1)
         
             # Lognormal model
             if args.rsd:

@@ -17,7 +17,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='density_split_measurements')
     parser.add_argument('--imock', type=int, required=False, default=None)
     parser.add_argument('--redshift', type=float, required=False, default=None)
-    parser.add_argument('--tracer', type=str, required=False, default='particles', choices=['particles', 'halos'])
+    parser.add_argument('--tracer', type=str, required=False, default='particles', choices=['particles', 'halos', 'ELG', 'LRG'])
     parser.add_argument('--nbar', type=float, required=False, default=0.0034)
     parser.add_argument('--cellsize', type=int, required=False, default=10)
     parser.add_argument('--cellsize2', type=int, required=False, default=None)
@@ -39,31 +39,52 @@ if __name__ == '__main__':
 
     # Directories
     data_dir = '/feynman/scratch/dphp/mp270220/abacus/'
-    ds_dir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
+    if (args.nsplits == 5) or (args.nbar < 0.001) or (args.tracer == 'ELG') or (args.rsd):
+        ds_dir = '/feynman/scratch/dphp/mp270220/outputs/densitysplit/'
+    else:
+        ds_dir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
     mesh_dir = '/feynman/scratch/dphp/mp270220/outputs'
-    plots_dir = '/feynman/home/dphp/mp270220/plots/densitysplit'
     
     # Filenames
     if args.tracer == 'halos':
         sim_name = 'AbacusSummit_2Gpc_z{:.3f}_{{}}'.format(z)
     elif args.tracer == 'particles':
         sim_name = 'AbacusSummit_2Gpc_z{:.3f}_{{}}_downsampled_particles_nbar{:.4f}'.format(z, args.nbar)
+    elif args.tracer in ['LRG', 'ELG']:
+        #sim_name = 'AbacusSummit_1Gpc_z0.8-1.1_{{}}_{}'.format(args.tracer)
+        sim_name = 'AbacusSummit_2Gpc_{}_z{:.3f}_{{}}'.format(args.tracer, z)
     base_name = sim_name + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(args.smoothing_radius) if args.smoothing_radius is not None else '')
-    ds_name = base_name + '_3splits_randoms_size4_RH_CCF{}'.format('_RSD' if args.rsd else '')
+    ds_name = base_name + '_{:d}splits_randoms_size4_RH_CCF{}'.format(args.nsplits, '_rsd' if args.rsd else '')
 
     # Load measured density splits
-    nmocks = 25 if args.nbar < 0.01 else 8
+    if args.tracer in ['ELG', 'LRG']:
+        nmocks = 25
+    else:
+        nmocks = 25 if (args.nbar < 0.01) else 8
+    if args.rsd:
+        nmocks = 8
     mocks_fns = [os.path.join(ds_dir, ds_name.format('ph0{:02d}'.format(i))+'.npy') for i in range(nmocks)]
 
     measurements = CountInCellsDensitySplitMeasurement(mocks_fns)
+    nmocks = measurements.nmocks
     measurements.set_pdf1D()
 
     for s in sep:
-        measurements.set_bias_function(s)
-        measurements.set_pdf2D(s, swidth=0.1)
+        if args.rsd:
+            #mu = np.linspace(-1, 1, 201)
+            #measurements.set_bias_function(s, mu=mu, swidth=0.01, method='sphere')
+            measurements.set_bias_function(s)
+        else:
+            measurements.set_bias_function(s)
+        #measurements.set_pdf2D(s, swidth=0.0001)
 
-    measurements.set_densitysplits()
+    try:
+        measurements.set_densitysplits()
+        print('corr shape:', measurements.smoothed_corr.shape)
+    except:
+        pass
 
+    ds_dir = '/feynman/work/dphp/mp270220/outputs/densitysplit/'
     outputname = ds_name.format('{}mocks'.format(nmocks)) + '_compressed'
     measurements.save(os.path.join(ds_dir, outputname))
     

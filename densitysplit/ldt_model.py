@@ -230,26 +230,29 @@ class LDT(BaseClass):
             delta_L = self.tau[self.yvals < self.ymax]
         if model=='gaussian':
             fLm = fL(delta_L)
-            pdf_shotnoise = self.density_pdf(rho=x)
-            mean_term = np.trapz(x * fLm * pdf_shotnoise, x=x)
-            toret = x * fLm - 1 #- mean_term #- 1
+            pdf_noshotnoise = self.density_pdf_noshotnoise(rho=x)
+            mean_term = np.trapz(x * fLm * pdf_noshotnoise, x=x)
+            print('mean term:', mean_term)
+            toret = x * fLm -1#/ mean_term - 1
+            mean_term = np.trapz(toret * pdf_noshotnoise, x=x)
+            print('mean term:', mean_term)
         elif model=='eulerian':
             toret = bG1 * (x-1) + bG2 / 2 * ((x-1)**2 - sigma_m**2)
         return toret
 
-    def delta_t_expect_shotnoise(self, rho=None, bG1=1, bG2=-1, model='gaussian', matter_norm=None):
-        ymax = self.ymax
-        mask = self.yvals < ymax
-        x = self.yvals[mask]
-        def func(N):
-            log_poisson_pdf = N * np.log(matter_norm * x[:, None]) - (matter_norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
-            poisson_pdf = np.exp(log_poisson_pdf)
-            return poisson_pdf
-        if rho is None:
-            rho = self.kvals / matter_norm
-        delta_t_expect = self.delta_t_expect(rho=rho, bG1=bG1, bG2=bG2, model=model)
-        toret = matter_norm * np.trapz(func(np.round(matter_norm * rho)) * delta_t_expect[None, :], x=rho, axis=1)
-        return toret
+    # def delta_t_expect_shotnoise(self, rho=None, bG1=1, bG2=-1, model='gaussian', matter_norm=None):
+    #     ymax = self.ymax
+    #     mask = self.yvals < ymax
+    #     x = self.yvals[mask]
+    #     def func(N):
+    #         log_poisson_pdf = N * np.log(matter_norm * x[:, None]) - (matter_norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
+    #         poisson_pdf = np.exp(log_poisson_pdf)
+    #         return poisson_pdf
+    #     if rho is None:
+    #         rho = self.kvals / matter_norm
+    #     delta_t_expect = self.delta_t_expect(rho=rho, bG1=bG1, bG2=bG2, model=model)
+    #     toret = matter_norm * np.trapz(func(np.round(matter_norm * rho)) * delta_t_expect[None, :], x=rho, axis=1)
+    #     return toret
 
     def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0, model='gaussian', matter_norm=None):
         alpha = self.alpha(alpha0=alpha0, alpha1=alpha1, alpha2=alpha2)[:, None]
@@ -330,7 +333,7 @@ class LDT(BaseClass):
             return func(k) * norm / density_pdfvals
 
     # bias function with bias and shot noise model from Gould et al 2024
-    def tracer_bias(self, rho=None, xi_ratio=1, **kwargs):
+    def tracer_bias(self, rho=None, **kwargs):
         ymax = self.ymax
         mask = self.yvals < ymax
         x = self.yvals[mask]
@@ -347,10 +350,10 @@ class LDT(BaseClass):
         if (self.kvals is None) and (rho is not None):
             k = np.round(norm * rho)
             k = np.append(k, np.max(k)+1)
-            return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm / density_pdfvals * xi_ratio
+            return interp1d(k, func(k), bounds_error=False, fill_value=0)(norm * rho) * norm / density_pdfvals
         else:
             k=self.kvals
-            return func(k) * norm / density_pdfvals * xi_ratio
+            return func(k) * norm / density_pdfvals
 
     def fit_from_pdf(self, x, y, err=None, sigma_init=1., fix_sigma=True, bias=None, norm=None, super_poisson=True, matter_norm=None, xlim=None):
         mask = (x >= -1) & (x < np.inf)
@@ -540,6 +543,10 @@ class LDTDensitySplitModel(LDT):
                 bias = self.tracer_bias(rho=xvals, model=bias_model, **kwargs)
             else:
                 bias = self.bias(rho=xvals, **kwargs)
+        if bias_model in ['gaussian', 'eulerian']:
+            tracer_norm = np.sum((xvals-1)*density_pdf*bias)/self.norm
+        else:
+            tracern_norm = 1
         print('bias shape: ', bias.shape)
         if bias.ndim > 1:
             toint = bias * density_pdf[:, None]
@@ -554,7 +561,7 @@ class LDTDensitySplitModel(LDT):
             norm = np.nansum(density_pdf[ds_mask])/self.norm
             dsplits.append(res/norm * xi)
         self.logger.info('Computed LDT model for {} xi values in elapsed time: {}s'.format(len(np.array(xi)), time.time()-t0))
-        return dsplits
+        return np.array(dsplits) * tracer_norm
  
     def compute_dsplits_test(self, xi, nsplits=None, density_bins=None, x=None, **kwargs):
         if nsplits is not None:

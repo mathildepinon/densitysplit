@@ -30,7 +30,6 @@ class Data:
 
         self.cut_lower_mass(mass_cut)
 
-
     def cut_lower_mass(self, mass_cut):
         if mass_cut is not None:
             self.mass_cut = mass_cut
@@ -47,6 +46,21 @@ class Data:
             if self.weights is not None:
                 self.weights = self.weights[self.weights > mass_cut]
 
+    def downsample(self, factor=1, seed=0):
+        if factor != 1:
+            np.random.seed(seed)
+            sample = np.random.uniform(0., 1., self.positions.shape[1]) <= factor
+            self.positions = self.positions[:, sample]
+            self.size = np.shape(self.positions)[1]
+
+            if self.velocities is not None:
+                self.velocities = self.velocities[:, sample]
+
+            if self.positions_rsd is not None:
+                self.positions_rsd = self.positions_rsd[:, sample]
+
+            if self.weights is not None:
+                self.weights = self.weights[:, sample]
 
     def shift_boxcenter(self, offset):
         self.positions = self.positions + offset

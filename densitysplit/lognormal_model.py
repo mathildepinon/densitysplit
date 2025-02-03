@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import math
 import scipy
 import logging 
@@ -30,18 +31,16 @@ class LognormalDensityModel(BaseClass):
             self.sigma = sigma
         if delta0 is not None:
             self.delta0 = delta0
-        #pdf_model = np.zeros_like(delta)
-        #pdf_model[delta > -self.delta0] = scipy.stats.lognorm.pdf(delta[delta > -self.delta0], self.sigma, -self.delta0, self.delta0 * np.exp(-self.sigma**2 / 2))
         pdf_model = scipy.stats.lognorm.pdf(delta, self.sigma, -self.delta0, self.delta0 * np.exp(-self.sigma**2 / 2))
         return pdf_model
 
-    def density_shotnoise(self, norm, k=None, delta=None, sigma=None, delta0=None):
+    def density_shotnoise(self, norm, k=None, delta=None, sigma=None, delta0=None, **kwargs):
         if sigma is not None:
             self.sigma = sigma
         if delta0 is not None:
             self.delta0 = delta0
         x = np.arange(max(0, 1-self.delta0)+0.001, 11, 0.01)
-        density_pdfvals = self.density(x-1, sigma, delta0)
+        density_pdfvals = self.density(x-1, sigma, delta0, **kwargs)
         def func(N):
             log_poisson_pdf = N * np.log(norm * x[:, None]) - (norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
             poisson_pdf = np.exp(log_poisson_pdf)
@@ -120,6 +119,35 @@ class LognormalDensityModel(BaseClass):
         self.logger.info('Seting sigma to {:.3f}, delta0 to {:.3f}.'.format(self.sigma, self.delta0))    
         return bestfit_params
 
+    def fit_params_from_sample(self, delta_sample, params_init=np.array([1., 1.]), shotnoise=False, norm=None):
+        """Fit parameters of the lognormal distribution (sigma, delta0) from an input delta sample."""
+        self.logger.info('Fitting sigma, delta0 to match input PDF.')
+        delta_sample = delta_sample.flatten()
+        delta_splits = np.split(delta_sample, 400)
+        def loglikelihood(params):
+            toret = 0
+            for delta_split in delta_splits:
+                if shotnoise:
+                    y = self.density_shotnoise(norm=norm, delta=delta_split, sigma=params[0], delta0=params[1])
+                else:
+                    y = self.density(delta_split, params[0], params[1])
+                logpdf = np.log(y)
+                maskinf = np.logical_not(np.isinf(logpdf))
+                toret += np.nansum(logpdf[maskinf])
+            return -toret
+        t0 = time.time()
+        loglikelihood(params_init)
+        print('likelihood evaluation in elapsed time {}s'.format(t1-t0))
+        t0 = time.time()
+        fit = scipy.optimize.minimize(loglikelihood, x0=params_init)
+        print('minimization in elapsed time {}s'.format(t1-t0))
+        print(fit)
+        bestfit_params = fit[0]
+        self.sigma = bestfit_params[0]
+        self.delta0 = bestfit_params[1]
+        self.logger.info('Seting sigma to {:.3f}, delta0 to {:.3f}.'.format(self.sigma, self.delta0))    
+        return bestfit_params
+
     def compute_bias_function(self, delta, xiR, **kwargs):
         logxiR = np.log(1 + xiR/(self.delta0**2))
         r = logxiR/self.sigma**2
@@ -164,6 +192,7 @@ class BiasedLognormalDensityModel(LognormalDensityModel):
             self.__dict__ = args[0].__dict__.copy()
         else:
             super().__init__(**kwargs)
+        self.b1 = 1
         self.logger = logging.getLogger('BiasedLognormalDensityModel')
         self.logger.info('Initializing BiasedLognormalDensityModel')
 
@@ -192,47 +221,75 @@ class BiasedLognormalDensityModel(LognormalDensityModel):
         else:
             return biased_deltas
         
-    def density(self, delta, model='quadratic', sigma=None, delta0=None, b1=1., b2=0., b3=0.):
-        if model=='test':
-            delta2 = delta0**2*(np.exp(sigma**2)-1)
-            delta3 = 3/delta0**2*delta2 + 1/delta0**3*delta2**(3./2)
-            biaseddelta = b1*delta + b2/2.*(delta**2 - delta2) + b3*(delta**3 - delta3)
-            pdf_model = scipy.stats.lognorm.pdf(biaseddelta, sigma, -delta0, delta0 * np.exp(-sigma**2 / 2))
-            norm = b1 + 2*b2*delta + 2*b3*delta**2
-            return pdf_model/np.abs(norm)
-        else:
-            pdf_model = scipy.stats.lognorm.pdf(delta, sigma, -delta0, delta0 * np.exp(-sigma**2 / 2))
-            biaseddelta, deriv = self.bias_function(delta, model, sigma, delta0, b1, b2, b3, return_deriv=True)
-            pdf_model /= np.abs(deriv)
-            biased_pdf_model = np.interp(delta, biaseddelta, pdf_model, left=0, right=0)
-            return biased_pdf_model
-            
-    def fit_params_from_pdf(self, delta=None, density_pdf=None, model='quadratic', params_init=None, sigma=None):
-        """Fit parameters of the biased lognormal distribution to match the input pdf."""
-        if model=='linear':
-            params_init = np.array([1.])
-        if model=='quadratic':
-            params_init = np.array([1., 0.])
-        if model=='cubic':
-            params_init = np.array([1., 0., 0.])
-        if model=='gaussian':
-            params_init = np.array([0.37, 0.955, 1.52, 0.007])
-        if model=='test':
-            params_init = np.array([1., 1., 1., 0., 0.])
-        self.logger.info('Fitting {} params'.format(len(params_init)))
-        
-        def to_fit(delta, *params):
-            if model=='test' or model=='gaussian':
-                y = self.density(delta, model, *params)
-            else:
-                y = self.density(delta, model, self.sigma, self.delta0, *params)
-            return y
+    # def density(self, delta, model='quadratic', sigma=None, delta0=None, b1=1., b2=0., b3=0.):
+    #     if model=='test':
+    #         delta2 = delta0**2*(np.exp(sigma**2)-1)
+    #         delta3 = 3/delta0**2*delta2 + 1/delta0**3*delta2**(3./2)
+    #         biaseddelta = b1*delta + b2/2.*(delta**2 - delta2) + b3*(delta**3 - delta3)
+    #         pdf_model = scipy.stats.lognorm.pdf(biaseddelta, sigma, -delta0, delta0 * np.exp(-sigma**2 / 2))
+    #         norm = b1 + 2*b2*delta + 2*b3*delta**2
+    #         return pdf_model/np.abs(norm)
+    #     else:
+    #         pdf_model = scipy.stats.lognorm.pdf(delta, sigma, -delta0, delta0 * np.exp(-sigma**2 / 2))
+    #         biaseddelta, deriv = self.bias_function(delta, model, sigma, delta0, b1, b2, b3, return_deriv=True)
+    #         pdf_model /= np.abs(deriv)
+    #         biased_pdf_model = np.interp(delta, biaseddelta, pdf_model, left=0, right=0)
+    #         return biased_pdf_model
 
+    def density(self, delta, sigma=None, delta0=None, b1=None):
+        if sigma is not None:
+            self.sigma = sigma
+        if delta0 is not None:
+            self.delta0 = delta0
+        if b1 is not None:
+            self.b1 = b1
+        pdf_model = scipy.stats.lognorm.pdf(delta/self.b1, self.sigma, -self.delta0, self.delta0 * np.exp(-self.sigma**2 / 2)) / self.b1
+        return pdf_model
+
+    def fit_params_from_pdf(self, delta=None, density_pdf=None, params_init=np.array([1., 1., 1.]), sigma=None, shotnoise=False, norm=None):
+        """Fit parameters of the lognormal distribution (sigma, delta0, b1) to match the input pdf."""
+        self.logger.info('Fitting sigma, delta0, b1 to match input PDF.')
+        def to_fit(delta, *params):
+            if shotnoise:
+                y = self.density_shotnoise(norm=norm, delta=delta, sigma=params[0], delta0=params[1], b1=params[2])
+            else:
+                y = self.density(delta, sigma=params[0], delta0=params[1], b1=params[2])
+            return y
         fit = scipy.optimize.curve_fit(to_fit, delta, density_pdf, p0=params_init, sigma=sigma)
         bestfit_params = fit[0]
-        self.bias_params = bestfit_params
-        self.logger.info('Best fit parameters: {}'.format(bestfit_params))      
+        self.sigma = bestfit_params[0]
+        self.delta0 = bestfit_params[1]
+        self.b1 = bestfit_params[2]
+        self.logger.info('Seting sigma to {:.3f}, delta0 to {:.3f}, b1 to {:.3f}.'.format(self.sigma, self.delta0, self.b1))    
         return bestfit_params
+
+            
+    # def fit_params_from_pdf(self, delta=None, density_pdf=None, model='quadratic', params_init=None, sigma=None):
+    #     """Fit parameters of the biased lognormal distribution to match the input pdf."""
+    #     if model=='linear':
+    #         params_init = np.array([1.])
+    #     if model=='quadratic':
+    #         params_init = np.array([1., 0.])
+    #     if model=='cubic':
+    #         params_init = np.array([1., 0., 0.])
+    #     if model=='gaussian':
+    #         params_init = np.array([0.37, 0.955, 1.52, 0.007])
+    #     if model=='test':
+    #         params_init = np.array([1., 1., 1., 0., 0.])
+    #     self.logger.info('Fitting {} params'.format(len(params_init)))
+        
+    #     def to_fit(delta, *params):
+    #         if model=='test' or model=='gaussian':
+    #             y = self.density(delta, model, *params)
+    #         else:
+    #             y = self.density(delta, model, self.sigma, self.delta0, *params)
+    #         return y
+
+    #     fit = scipy.optimize.curve_fit(to_fit, delta, density_pdf, p0=params_init, sigma=sigma)
+    #     bestfit_params = fit[0]
+    #     self.bias_params = bestfit_params
+    #     self.logger.info('Best fit parameters: {}'.format(bestfit_params))      
+    #     return bestfit_params
 
 
 class LognormalDensitySplitModel(LognormalDensityModel):
@@ -241,7 +298,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
     """
 
     def __init__(self, *args, nsplits=3, density_bins=None, **kwargs):
-        if len(args) and type(args[0]) is LognormalDensityModel:
+        if len(args) and type(args[0]) in [LognormalDensityModel, BiasedLognormalDensityModel]:
             self.__dict__ = args[0].__dict__.copy()
         else:
             super().__init__(**kwargs)
@@ -253,7 +310,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             self._fixed_density_bins = False
             self.set_params()
 
-    def set_params(self, sigma=1, delta0=1, delta02=1, sigma2=1):
+    def set_params(self, sigma=1, delta0=1, delta02=1, sigma2=1, b1=1):
         if sigma is not None:
             self.logger.info('Setting sigma to {:.3f}.'.format(sigma))
             self.sigma = sigma
@@ -266,6 +323,9 @@ class LognormalDensitySplitModel(LognormalDensityModel):
         if sigma2 is not None:
             self.logger.info('Setting sigma2 to {:.3f}.'.format(sigma2))
             self.sigma2 = sigma2
+        if b1 is not None:
+            self.logger.info('Setting b1 to {:.3f}.'.format(b1))
+            self.b1 = b1
         if not self._fixed_density_bins:
             splits = np.linspace(0, 1, self.nsplits+1)
             self.density_bins = scipy.stats.lognorm.ppf(splits, self.sigma, -self.delta0, self.delta0*np.exp(-self.sigma**2/2.))
@@ -276,7 +336,7 @@ class LognormalDensitySplitModel(LognormalDensityModel):
         # lognormal transform
         X = np.log(1 + delta[..., 0]/self.delta0) + self.sigma**2/2
         Y = np.log(1 + delta[..., 1]/self.delta02) + self.sigma2**2/2
-        pdf_model = scipy.stats.multivariate_normal(mean=[0, 0], cov=cov).pdf(np.array([X, Y]).T).T
+        pdf_model = scipy.stats.multivariate_normal(mean=[0, 0], cov=cov, allow_singular=True).pdf(np.array([X, Y]).T).T
         pdf_model = pdf_model / ((self.delta0 + delta[..., 0])*(self.delta02 + delta[..., 1]))
         return pdf_model
 
@@ -329,25 +389,25 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             shotnoise = np.real(w2 / self.nbar)
             self.double_smoothed_xi  += shotnoise.ravel()
         
-    def compute_bias_function(self, delta, sigma=None, delta0=None, delta02=1., xiR=None, sep=None, **kwargs):
-        self.set_params(sigma=sigma, delta0=delta0, delta02=delta02)
-        if sep is not None:
-            self.sep = sep
-        if xiR is None:
-            if not hasattr(self, 'smoothed_xi'):
-                self.set_smoothed_xi_model(**kwargs)
-            if smoothing == 1:
-                xiR = self.smoothed_xi
-            elif smoothing > 1:
-                xiR = self.double_smoothed_xi
+    # def compute_bias_function(self, delta, sigma=None, delta0=None, delta02=1., xiR=None, sep=None, **kwargs):
+    #     self.set_params(sigma=sigma, delta0=delta0, delta02=delta02)
+    #     if sep is not None:
+    #         self.sep = sep
+    #     if xiR is None:
+    #         if not hasattr(self, 'smoothed_xi'):
+    #             self.set_smoothed_xi_model(**kwargs)
+    #         if smoothing == 1:
+    #             xiR = self.smoothed_xi
+    #         elif smoothing > 1:
+    #             xiR = self.double_smoothed_xi
 
-        # Nb: here we assume delta0 == delta02
-        logxiR = np.log(1 + xiR/(self.delta0**2))
-        r = logxiR/self.sigma**2
-        logdelta = np.log(1 + delta/self.delta0) + self.sigma**2/2
-        res = self.delta0 * (-1 + np.exp(-r**2 * self.sigma**2 /2 + r*logdelta))
+    #     # Nb: here we assume delta0 == delta02
+    #     logxiR = np.log(1 + xiR/(self.delta0**2))
+    #     r = logxiR/self.sigma**2
+    #     logdelta = np.log(1 + delta/self.delta0) + self.sigma**2/2
+    #     res = self.delta0 * (-1 + np.exp(-r**2 * self.sigma**2 /2 + r*logdelta))
         
-        return res/xiR
+    #     return res/xiR
 
     def _compute_main_term(self, delta, sigma=None, delta0=None, delta02=1., xiR=None, sep=None, smoothing=1, **kwargs):
         self.set_params(sigma=sigma, delta0=delta0, delta02=delta02)
@@ -408,14 +468,77 @@ class LognormalDensitySplitModel(LognormalDensityModel):
             xvals, yvals = 1+delta, 1+delta
         rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
         density_pdf_2D_list = list()
-        for i in range(len(xi)):
-            if np.isnan(xi[i]):
-                xi[i] = 0
-            cov = np.array([[self.sigma**2, xi[i]],
-                            [xi[i], self.sigma**2]])
-            density_pdf_2D = self.density2D_shotnoise(norm, delta=delta, k=k, cov=cov, **kwargs)
+        xiYR = np.log(1 + xi/self.delta0**2)
+        self.logger.info('Computing lognormal density split model for {} values of xi'.format(len(xi)))
+        ### TEST
+        print('norm:', norm)
+        lognormalbiasmodel = np.array([self.compute_bias_function_shotnoise(xiR=xi[i], norm=norm, delta=xvals-1) for i in range(len(xi))])
+        lognormaldensitymodel = self.density_shotnoise(norm=norm, delta=xvals-1)
+        dsplits = list()
+        for i in range(len(self.density_bins)-1):
+            d1 = max(self.density_bins[i], -self.delta0)
+            d2 = self.density_bins[i+1]
+            ds_mask = (xvals >= 1 + d1) & (xvals < 1 + d2)
+            toint = lognormalbiasmodel[:, ds_mask] * lognormaldensitymodel[ds_mask]
+            res = np.nansum(toint, axis=1)
+            denom = np.nansum(lognormaldensitymodel[ds_mask])
+            dsplits.append(res/denom * np.array(xi))
+        return dsplits
+        ########
+        for i in range(len(xiYR)):
+            self.logger.info('i = {}'.format(i))
+            if np.isnan(xiYR[i]):
+                xiYR[i] = 0
+            cov = np.array([[self.sigma**2, xiYR[i]],
+                            [xiYR[i], self.sigma**2]])
+            print('cov', cov)
+            print('eignevalues: ', np.linalg.eig(cov))
+            try:
+                density_pdf_2D = self.density2D_shotnoise(norm, delta=delta, k=k, cov=cov, **kwargs)
+            except:
+                print('singular cov, will yield nans')
+                density_pdf_2D = np.full((len(delta), len(delta)), np.nan)
             density_pdf_2D_list.append(density_pdf_2D)
         density_pdf_2D = np.array(density_pdf_2D_list)
+        if k is not None:
+            innerint = np.nansum(rho2[None, :] * density_pdf_2D, axis=-1)/norm
+        else:
+            #innerint = np.trapz(rho2[None, :] * density_pdf_2D, x=yvals, axis=-1)
+            innerint = np.nansum(rho2[None, :] * density_pdf_2D, axis=-1)/norm
+        dsplits = list()
+        for i in range(len(self.density_bins)-1):
+            d1 = max(self.density_bins[i], -1)
+            d2 = self.density_bins[i+1]
+            self.logger.info('Computing lognormal density split model in density bin {:.2f}, {:.2f}'.format(d1, d2))
+            t0 = time.time()
+            ds_mask = (rho1[:, 0] >= 1 + d1) & (rho1[:, 0] < 1 + d2)
+            if k is not None:
+                outerint = np.nansum(innerint[..., ds_mask], axis=-1)/norm
+                denom =  np.nansum(np.sum(density_pdf_2D, axis=-1)[..., ds_mask], axis=-1)/norm**2
+            else:
+                outerint = np.nansum(innerint[..., ds_mask], axis=-1)/norm
+                denom =  np.nansum(np.sum(density_pdf_2D, axis=-1)[..., ds_mask], axis=-1)/norm**2
+                #outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+                #denom =  np.trapz(np.trapz(density_pdf_2D, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
+            res = outerint/denom - 1
+            self.logger.info('Computed lognormal model in split {:.2f}, {:.2f} for {} xi values in elapsed time: {}s'.format(d1, d2, len(np.array(xi)), time.time()-t0))
+            dsplits.append(res)
+        return dsplits       
+
+    def compute_dsplits_test(self, density_pdf_2D, norm, nsplits=None, density_bins=None, delta=None, k=None, **kwargs):
+        if nsplits is not None:
+            self.nsplits = nsplits
+        if density_bins is not None:
+            self.density_bins = density_bins
+        if delta is None:
+            if k is not None:
+                xvals = yvals = k/norm
+            else:
+                xvals = yvals = np.arange(max(0, 1-self.delta0)+0.001, 11, 0.01)
+        else:
+            xvals, yvals = 1+delta, 1+delta
+        rho1, rho2 = np.meshgrid(xvals, yvals, indexing='ij')
+        density_pdf_2D = np.array(density_pdf_2D)
         if k is not None:
             innerint = np.sum(rho2[None, :] * density_pdf_2D, axis=-1)/norm
         else:
@@ -437,6 +560,6 @@ class LognormalDensitySplitModel(LognormalDensityModel):
                 #outerint = np.trapz(innerint[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
                 #denom =  np.trapz(np.trapz(density_pdf_2D, x=rho2[0, :], axis=-1)[..., ds_mask], x=rho1[:, 0][ds_mask], axis=-1)
             res = outerint/denom - 1
-            self.logger.info('Computed lognormal model in split {:.2f}, {:.2f} for {} xi values in elapsed time: {}s'.format(d1, d2, len(np.array(xi)), time.time()-t0))
+            self.logger.info('Computed lognormal model in split {:.2f}, {:.2f} for {} xi values in elapsed time: {}s'.format(d1, d2, len(density_pdf_2D), time.time()-t0))
             dsplits.append(res)
-        return dsplits        
+        return dsplits         

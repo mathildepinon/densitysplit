@@ -12,7 +12,7 @@ figure.subplot.bottom  : 0.1   # the bottom of the subplots of the figure
 figure.subplot.top     : 0.95    # the top of the subplots of the figure
 
 ## LINES
-lines.linewidth : 1.5
+lines.linewidth : 1.2
 
 ## AXES
 axes.facecolor: white

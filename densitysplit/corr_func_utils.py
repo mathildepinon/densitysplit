@@ -23,8 +23,11 @@ def get_poles(mocks_results, ells):
     return xiell, cov
 
 
-def get_split_poles(results, ells, nsplits):
-    nells = len(ells)
+def get_split_poles(results, sep=None, ells=None):
+    if ells is None:
+        nells = 1
+    else:
+        nells = len(ells)
     n = len(results)
     nsplits = len(results[0])
 
@@ -32,12 +35,22 @@ def get_split_poles(results, ells, nsplits):
     cov = list()
 
     for i in range(nsplits):
-        results_poles = [np.ravel(res[i].get_corr(ells=ells, return_sep=False)) for res in results]
+        if ells is None:
+            #results_poles = [np.ravel([res[i].get_corr()]) for res in results]
+            results_poles = [np.ravel([res[i](sep=sep, ignore_nan=True)]) for res in results]
+        else:
+            #results_poles = [np.ravel(res[i].get_corr(ells=ells)) for res in results]
+            results_poles = [np.ravel(res[i](ells=ells, sep=sep, ignore_nan=True)) for res in results]
         poles = np.mean(results_poles, axis=0)
         xiell.append(poles.reshape((nells, len(poles)//nells)))
 
-    cov = np.cov([np.ravel([res[i].get_corr(ells=ells, return_sep=False) for i in range(nsplits)]) for res in results], rowvar=False)
-
+    if ells is None:
+        #cov = np.cov([np.ravel([[res[i].get_corr(return_sep=False)] for i in range(nsplits)]) for res in results], rowvar=False)
+        cov = np.cov([np.ravel([[res[i](sep=sep, ignore_nan=True)] for i in range(nsplits)]) for res in results], rowvar=False)
+    else:
+        #cov = np.cov([np.ravel([res[i].get_corr(ells=ells, return_sep=False) for i in range(nsplits)]) for res in results], rowvar=False)
+        cov = np.cov([np.ravel([res[i](ells=ells, sep=sep, ignore_nan=True) for i in range(nsplits)]) for res in results], rowvar=False)
+        
     return xiell, cov
 
 
