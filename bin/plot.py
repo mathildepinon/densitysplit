@@ -443,7 +443,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='density_split_plots')
     parser.add_argument('--imock', type=int, required=False, default=None)
     parser.add_argument('--redshift', type=float, required=False, default=None)
-    parser.add_argument('--tracer', type=str, required=False, default='particles', choices=['particles', 'halos', 'ELG', 'LRG'])
+    parser.add_argument('--tracer', type=str, required=False, default='particles', choices=['particles', 'halos'])
     parser.add_argument('--nbar', type=float, required=False, default=0.0034)
     parser.add_argument('--cellsize', type=int, required=False, default=10)
     parser.add_argument('--cellsize2', type=int, required=False, default=None)
@@ -497,23 +497,13 @@ if __name__ == '__main__':
         sim_name = 'AbacusSummit_2Gpc_z{:.3f}_{{}}'.format(z)
     elif args.tracer == 'particles':
         sim_name = 'AbacusSummit_2Gpc_z{:.3f}_{{}}_downsampled_particles_nbar{:.4f}'.format(z, args.nbar)
-    elif args.tracer in ['ELG', 'LRG']:
-        #sim_name = 'AbacusSummit_1Gpc_z0.8-1.1_{}'.format(args.tracer)
-        sim_name = 'AbacusSummit_2Gpc_{}_z{:.3f}_{{}}'.format(args.tracer, z)
-
-    bias_model = None
-    if args.tracer in ['ELG', 'LRG']:
-        bias_model = 'linear'
 
     for smoothing_radius in args.smoothing_radius:       
         base_name = sim_name + '_cellsize{:d}{}_resampler{}{}'.format(args.cellsize, '_cellsize{:d}'.format(args.cellsize2) if args.cellsize2 is not None else '', args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '')
         ds_name = base_name + '_{:d}splits_randoms_size4_RH_CCF{}'.format(args.nsplits, '_rsd' if args.rsd else '')
     
         # Load measured density split measurements
-        if args.tracer in ['ELG', 'LRG']:
-            nmocks = 5#25
-        else:
-            nmocks = 25 if (args.nbar < 0.01) else 8
+        nmocks = 25 if (args.nbar < 0.01) else 8
         if args.rsd: 
             nmocks = 8
         fn = os.path.join(ds_dir, ds_name.format('{}mocks'.format(nmocks)) + '_compressed.npy')
@@ -581,31 +571,25 @@ if __name__ == '__main__':
         ldtmodel = LDT(redshift=z, smoothing_scale=smoothing_radius, smoothing_kernel=1, nbar=nbar)
         ldtmodel.interpolate_sigma()
 
-        # Fit variance and/or bias
-        if bias_model=='linear':
-            sigma_noshotnoise, b1 = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=fix_sigma, sigma_init=sigma_noshotnoise, bias=bias_model, norm=norm)               
-            print('fitted b1:', b1)
-        else:
-            sigma_noshotnoise = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, sigma_init=sigma_noshotnoise, norm=norm)
-            #sigma_noshotnoise = ldtmodel.fit_from_sample(N_sample, sigma_ini=sigma_noshotnoise)
-            b1 = 1
+        # Fit variance
+        sigma_noshotnoise  = ldtmodel.fit_from_pdf(result.pdf1D_x, mean_pdf1D, err=std_pdf1D if nmocks > 1 else None, fix_sigma=False, sigma_init=sigma_noshotnoise, norm=norm)               
         print('fitted sigma no shotnoise:', sigma_noshotnoise)
         #np.save('/feynman/scratch/dphp/mp270220/outputs/ldt_sigma_fit', sigma_noshotnoise)
     
         if args.resampler=='tophat':
             if interpolate:
                 ldtmodel.compute_ldt(sigma_noshotnoise)
-                ldtpdf1D = ldtmodel.density_pdf(1+result.pdf1D_x, b1=b1)
+                ldtpdf1D = ldtmodel.density_pdf(1+result.pdf1D_x)
             else:
                 ldtmodel.compute_ldt(sigma_noshotnoise, k=(1 + result.pdf1D_x)*norm)
-                ldtpdf1D = ldtmodel.density_pdf(b1=b1)
+                ldtpdf1D = ldtmodel.density_pdf()
             if 'shotnoise' in args.to_plot:
                 x = ldtmodel.yvals[ldtmodel.yvals < ldtmodel.ymax]
-                ldtpdf1D_noshotnoise = ldtmodel.density_pdf_noshotnoise(rho=x, b1=b1)   
+                ldtpdf1D_noshotnoise = ldtmodel.density_pdf_noshotnoise(rho=x)   
                 ldtpdf1D_noshotnoise = interp1d(x, ldtpdf1D_noshotnoise, bounds_error=False, fill_value=0)(1 + result.pdf1D_x)           
         else:
             ldtmodel.compute_ldt(sigma_noshotnoise)
-            ldtpdf1D = ldtmodel.density_pdf(1 + result.pdf1D_x, b1=b1)
+            ldtpdf1D = ldtmodel.density_pdf(1 + result.pdf1D_x)
 
         ldt_cumulants = get_cumulants(result.pdf1D_x, ldtpdf1D)
         print("LDT cumulants: ", ldt_cumulants)
@@ -691,10 +675,7 @@ if __name__ == '__main__':
                     print('sqrt:', np.sqrt(xiR/np.mean(result.bias_corr[sep])))
 
                     # LDT model
-                    if bias_model=='gould':
-                        ldtbiasmodel = ldtmodel.tracer_bias(rho=1+result.bias_function_x[sep], **bias_params)*np.sqrt(xiR/np.mean(result.bias_corr[sep]))
-                    else:
-                        ldtbiasmodel = ldtmodel.bias(rho=1+result.bias_function_x[sep], b1=b1)
+                    ldtbiasmodel = ldtmodel.bias(rho=1+result.bias_function_x[sep])
             
                     # Lognormal model
                     if args.lognormal_shotnoise:
@@ -704,10 +685,7 @@ if __name__ == '__main__':
                     lognormalbiasmodel_approx = lognormalmodel.compute_bias_function_approx(result.bias_function_x[sep])
             
                     #models_bias = {'ldt': ldtbiasmodel, 'lognormal': lognormalbiasmodel, 'lognormal_approx': lognormalbiasmodel_approx}
-                    if bias_model=='gould':
-                        models_bias = {'ldt': ldtbiasmodel}
-                    else:
-                        models_bias = {'ldt': ldtbiasmodel, 'lognormal': lognormalbiasmodel}
+                    models_bias = {'ldt': ldtbiasmodel, 'lognormal': lognormalbiasmodel}
             
                     # Plot bias function
                     plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
@@ -715,7 +693,7 @@ if __name__ == '__main__':
                     plot_bias_function(result.bias_function_x[sep], mean_bias, std_bias, rebin=rebin, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
     
                     if 'shotnoise' in args.to_plot:
-                        ldtbiasmodel_noshotnoise = ldtmodel.bias_noshotnoise(rho=1+result.bias_function_x[sep], b1=1)
+                        ldtbiasmodel_noshotnoise = ldtmodel.bias_noshotnoise(rho=1+result.bias_function_x[sep])
                         models_pdf1D = {'ldt': ldtbiasmodel, 'ldt_noshotnoise': ldtbiasmodel_noshotnoise}
                         plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_s{:.0f}_biasfunction_LDT_shotnoise.pdf'.format(float(sep))
                         plot_bias_function_shotnoise(result.bias_function_x[sep], xlim=(-1, 4), rebin=rebin, sep=float(sep), models=models_pdf1D, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
@@ -741,7 +719,7 @@ if __name__ == '__main__':
                     std_hist = np.std(result.hist2D[sep], axis=0)
                     
                     # LDT model
-                    ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(result.bias_corr[sep]), b1=b1)
+                    ldtmodelpdf2D = ldtdsplitmodel.joint_density_pdf(np.mean(result.bias_corr[sep]))
 
                     # Lognormal model
                     xiYR = np.log(1 + np.mean(result.bias_corr[sep])/lognormaldsplitmodel.delta0**2)
@@ -808,8 +786,8 @@ if __name__ == '__main__':
             #mean_bias_allseps = np.mean(np.array([result.bias_function[sep] for sep in result.bias_function.keys()]), axis=1)
             #mean_bias_interp = interp1d(seps, mean_bias_allseps, axis=0)(sep)
             #print('bias shape: ', mean_bias_interp.T.shape)
-            #ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, b1=b1, bias=mean_bias_allseps.T[:, seps==20], density_pdf=None)
-            ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, b1=b1)
+            #ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR, bias=mean_bias_allseps.T[:, seps==20], density_pdf=None)
+            ldtdsplits = ldtdsplitmodel.compute_dsplits(mean_xiR)
         
             # Lognormal model
             if args.rsd:
