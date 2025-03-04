@@ -6,7 +6,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import lognorm
 
-from cosmoprimo import *
+from cosmoprimo import fiducial
 from pycorr import TwoPointCorrelationFunction, setup_logging
 
 from densitysplit import catalog_data, density_split
