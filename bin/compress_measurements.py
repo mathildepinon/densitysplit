@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
     # Load measured density splits
     if args.tracer in ['ELG', 'LRG']:
-        nmocks = 25
+        nmocks = 1#25
     else:
         nmocks = 25 if (args.nbar < 0.01) else 8
     if args.rsd:
