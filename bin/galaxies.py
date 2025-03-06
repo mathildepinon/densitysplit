@@ -410,7 +410,11 @@ if __name__ == '__main__':
     density_name = tracer_sim_name + '_cellsize{:d}_resampler{}{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '', '_rsd' if args.rsd else '')
     plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF.pdf'
     
-    plot_pdf1D(tracer_result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=(-1, 4), models=models_pdf1D, rtitle=args.nbar_matter<0.001, fn=os.path.join(plots_dir, plot_name), galaxies=True, **plotting)
+    maxpdf = tracer_result.pdf1D_x[np.argmax(mean_pdf1D)]
+    print('maxpdf', maxpdf)
+    print('xlim', (maxpdf-5*tracer_result.sigma, maxpdf+5*tracer_result.sigma))
+
+    plot_pdf1D(tracer_result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=(maxpdf-5*tracer_result.sigma, maxpdf+5*tracer_result.sigma), models=models_pdf1D, rtitle=args.nbar_matter<0.001, fn=os.path.join(plots_dir, plot_name), galaxies=True, **plotting)
 
     # Bias function
     for sep in tracer_result.bias_function.keys():
@@ -430,7 +434,7 @@ if __name__ == '__main__':
     
             # Plot bias function
             plot_name = tracer_base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
-            plot_bias_function(tracer_result.bias_function_x[sep], mean_bias, std_bias, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), galaxies=True, **plotting)
+            plot_bias_function(tracer_result.bias_function_x[sep], mean_bias, std_bias, xlim=(maxpdf-8*tracer_result.sigma, maxpdf+8*tracer_result.sigma), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), galaxies=True, **plotting)
 
     # Density splits
     try:

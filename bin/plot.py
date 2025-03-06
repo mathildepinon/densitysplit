@@ -78,7 +78,8 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absol
 
     if rtitle:
         axes[0].set_title(r'$R = {} \; \mathrm{{Mpc}}/h$'.format(smoothing_radius))
-    axes[0].legend(loc='upper right')
+    axes[0].legend(loc=(0.34, 0.58))
+    #axes[0].legend(loc='upper right')
     plt.rcParams["figure.autolayout"] = False
     plt.tight_layout()
     plt.subplots_adjust(hspace=0.15)
@@ -223,7 +224,7 @@ def plot_bias_function(x, mean_bias, std_bias, xlim=None, rebin=None, data_style
         axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m], zorder=20)
         axes[1].plot(x, (models[m] - mean_bias)/std_bias, **model_styles[m])
 
-    #axes[0].set_ylim(-7, 16)
+    #axes[0].set_ylim(ymax=12)
     axes[1].set_ylim(-2, 2)
     axes[0].legend(loc='lower right')
     dlabel = '\delta_{R,g}' if galaxies else '\delta_{R}'
@@ -554,8 +555,6 @@ if __name__ == '__main__':
         # Lognormal model
         lognormalmodel = LognormalDensityModel()
         mask0 = (std_pdf1D > 0) if (nmocks > 1) else np.full_like(std_pdf1D, True, dtype=bool)
-        if bias_model is not None:
-            lognormalmodel = BiasedLognormalDensityModel(lognormalmodel)
         lognormalmodel.fit_params_from_pdf(delta=result.pdf1D_x[mask0], density_pdf=mean_pdf1D[mask0],
                                             sigma=std_pdf1D[mask0] if nmocks > 1 else None, shotnoise=args.lognormal_shotnoise, norm=norm)
         #lognormalmodel.fit_params_from_sample(N_sample/norm-1, params_init=np.array([sigma_noshotnoise, 1.]), shotnoise=args.lognormal_shotnoise, norm=norm)
@@ -620,10 +619,15 @@ if __name__ == '__main__':
             else:
                 rebin = None
     
-            if args.nbar > 0.003:
-                xlim=(-1, 3)
-            else:
-                xlim=(-1, 4)
+            #if args.nbar > 0.003:
+            #    xlim=(-1, 3)
+            #else:
+            #    xlim=(-1, 4)
+
+            maxpdf = result.pdf1D_x[np.argmax(mean_pdf1D)]
+            print('maxpdf', maxpdf)
+            xlim=(maxpdf-5*sigma, maxpdf+5*sigma)
+            print('xlim', xlim)
             
             plot_pdf1D(result.pdf1D_x, mean_pdf1D, std_pdf1D, xlim=xlim, rebin=rebin, models=models_pdf1D, residuals=args.residuals, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
 
@@ -690,7 +694,7 @@ if __name__ == '__main__':
                     # Plot bias function
                     plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + ('_rsd' if args.rsd else '') + '_s{:.0f}_biasfunction.pdf'.format(float(sep))
             
-                    plot_bias_function(result.bias_function_x[sep], mean_bias, std_bias, rebin=rebin, xlim=(-1, 4), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
+                    plot_bias_function(result.bias_function_x[sep], mean_bias, std_bias, rebin=rebin, xlim=(maxpdf-8*sigma, maxpdf+8*sigma), sep=float(sep), models=models_bias, fn=os.path.join(plots_dir, plot_name), rescale_errorbars=np.sqrt(nmocks), **plotting)
     
                     if 'shotnoise' in args.to_plot:
                         ldtbiasmodel_noshotnoise = ldtmodel.bias_noshotnoise(rho=1+result.bias_function_x[sep])
