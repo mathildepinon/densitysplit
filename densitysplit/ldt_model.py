@@ -228,31 +228,19 @@ class LDT(BaseClass):
         else:
             x = self.yvals[self.yvals < self.ymax]
             delta_L = self.tau[self.yvals < self.ymax]
+        x_all = self.yvals[(self.yvals < self.ymax)]
+        delta_L_all = self.tau[(self.yvals < self.ymax)]
         if model=='gaussian':
             fLm = fL(delta_L)
             pdf_noshotnoise = self.density_pdf_noshotnoise(rho=x)
-            mean_term = np.trapz(x * fLm * pdf_noshotnoise, x=x)
-            print('mean term:', mean_term)
-            toret = x * fLm -1#/ mean_term - 1
-            mean_term = np.trapz(toret * pdf_noshotnoise, x=x)
-            print('mean term:', mean_term)
+            fLm_all = fL(delta_L_all)
+            pdf_noshotnoise_all = self.density_pdf_noshotnoise(rho=x_all)
+            mean_term = np.trapz(x_all * fLm_all * pdf_noshotnoise_all, x=x_all)
+            #print('mean_term:', mean_term)
+            toret = x * fLm / mean_term - 1
         elif model=='eulerian':
             toret = bG1 * (x-1) + bG2 / 2 * ((x-1)**2 - sigma_m**2)
         return toret
-
-    # def delta_t_expect_shotnoise(self, rho=None, bG1=1, bG2=-1, model='gaussian', matter_norm=None):
-    #     ymax = self.ymax
-    #     mask = self.yvals < ymax
-    #     x = self.yvals[mask]
-    #     def func(N):
-    #         log_poisson_pdf = N * np.log(matter_norm * x[:, None]) - (matter_norm * x[:, None]) - loggamma(N+1) # log to avoid overflow
-    #         poisson_pdf = np.exp(log_poisson_pdf)
-    #         return poisson_pdf
-    #     if rho is None:
-    #         rho = self.kvals / matter_norm
-    #     delta_t_expect = self.delta_t_expect(rho=rho, bG1=bG1, bG2=bG2, model=model)
-    #     toret = matter_norm * np.trapz(func(np.round(matter_norm * rho)) * delta_t_expect[None, :], x=rho, axis=1)
-    #     return toret
 
     def Nt_pdf(self, Nt, bG1=1, bG2=-1, alpha0=1, alpha1=0, alpha2=0, model='gaussian', matter_norm=None):
         alpha = self.alpha(alpha0=alpha0, alpha1=alpha1, alpha2=alpha2)[:, None]
@@ -404,13 +392,14 @@ class LDT(BaseClass):
             p0 = [float(sigma_init)]
         else:
             p0 = []
-        if bias == 'linear':
-            p0 = np.concatenate((p0, [1.]))
-        else:
-            if super_poisson:
-                p0 = np.concatenate((p0, [0.7, -1.25, 1, 0, 0]))
+        if bias is not None:
+            if bias == 'linear':
+                p0 = np.concatenate((p0, [1.]))
             else:
-                p0 = np.concatenate((p0, [0.7, -1.25]))
+                if super_poisson:
+                    p0 = np.concatenate((p0, [0.7, -1.25, 1, 0, 0]))
+                else:
+                    p0 = np.concatenate((p0, [0.7, -1.25]))
         fit = curve_fit(to_fit, x[mask], y[mask], p0=p0, sigma=err)
         print(fit)
         return fit[0]
