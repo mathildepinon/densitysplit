@@ -50,14 +50,22 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absol
                 models[m] = models[m][::rebin]
             if xlim is not None:
                 models[m] = models[m][mask]
+
+            xx = np.arange(np.min(x), np.max(x), 0.1)
+            model_toplot = interp1d(x, models[m], kind='cubic')(xx)
                 
-            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m])
+            axes[0].plot(xx, model_toplot, label=model_labels[m], **model_styles[m])
+
+            model_style = model_styles[m]
+            model_style.update(dict(ls='', marker='o', ms=2.6, markeredgewidth=0.9, mfc='white'))
+            model_style['mec'] = model_style['color']
+
             if residuals=='absolute':
-                axes[1].plot(x, (models[m] - mean_pdf1D), **model_styles[m])
+                axes[1].plot(x, (models[m] - mean_pdf1D), **model_style)
             elif residuals=='sigmas':
-                axes[1].plot(x, (models[m] - mean_pdf1D)/std_pdf1D, **model_styles[m])
+                axes[1].plot(x, (models[m] - mean_pdf1D)/std_pdf1D, **model_style)
             elif residuals=='percent':
-                axes[1].plot(x, (models[m] - mean_pdf1D)/mean_pdf1D, **model_styles[m])
+                axes[1].plot(x, (models[m] - mean_pdf1D)/mean_pdf1D, **model_style)
 
     axes[1].ticklabel_format(style='sci', scilimits=(-3, 3))
     dlabel = '\delta_{R,g}' if galaxies else '\delta_{R}'
