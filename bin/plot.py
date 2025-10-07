@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, Normalize, TwoSlopeNorm
 import matplotlib.ticker as ticker
+import matplotlib as mpl
 from scipy.optimize import minimize, curve_fit
 from scipy.interpolate import interp1d
 from iminuit import Minuit
@@ -56,9 +57,9 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absol
                 
             axes[0].plot(xx, model_toplot, label=model_labels[m], **model_styles[m])
 
-            model_style = model_styles[m]
-            model_style.update(dict(ls='', marker='o', ms=2.6, markeredgewidth=0.9, mfc='white'))
-            model_style['mec'] = model_style['color']
+            model_style = model_styles[m].copy()
+            # model_style.update(dict(ls='', marker='o', ms=2.6, markeredgewidth=0.9, mfc='white'))
+            # model_style['mec'] = model_style['color']
 
             if residuals=='absolute':
                 axes[1].plot(x, (models[m] - mean_pdf1D), **model_style)
@@ -87,6 +88,7 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absol
     if rtitle:
         axes[0].set_title(r'$R = {} \; \mathrm{{Mpc}}/h$'.format(smoothing_radius))
     axes[0].legend(loc=(0.34, 0.58))
+    axes[1].set_ylim((-3.5e-3, 3.5e-3))
     #axes[0].legend(loc='upper right')
     plt.rcParams["figure.autolayout"] = False
     plt.tight_layout()
@@ -96,6 +98,36 @@ def plot_pdf1D(x, mean_pdf1D, std_pdf1D, xlim=None, rebin=None, residuals='absol
     plt.close()
     print('Saved 1D PDF plot: {}.'.format(fn))
 
+def plot_split_pdf1D(x, mean_pdf1D, xlim=None, bins=None, colors=None, fn=None):
+    if xlim is not None:
+        mask = (x >= xlim[0]) & (x <= xlim[1])
+        x = x[mask]
+        mean_pdf1D = mean_pdf1D[mask]
+        
+    fig = plt.figure(figsize = (3.2, 3))
+
+    if bins is None:
+        plt.plot(x, mean_pdf1D, color='C0', alpha=1, ls='-')
+    else:
+        plt.plot(x, mean_pdf1D, ls='')
+        for i in range(len(bins)-1):
+            split_min = bins[i]
+            split_max = bins[i+1]
+            plt.fill_between(x, mean_pdf1D, where=(x>=split_min), color=colors[i], label=r'$\mathrm{{DS}} = {}$'.format(i+1), alpha=1)
+
+    dlabel = '\delta_{R}'
+    plabel = ''
+    plt.xlabel(r'${}$'.format(dlabel))
+    plt.ylabel(r'$\mathcal{{P}}{}({})$'.format(plabel, dlabel))
+    plt.legend()
+    plt.ylim(ymin=0)
+    plt.gca().xaxis.set_minor_locator(ticker.AutoMinorLocator())
+    plt.gca().yaxis.set_minor_locator(ticker.AutoMinorLocator())
+    plt.grid(visible=False)
+
+    plt.savefig(fn, dpi=500)
+    plt.close()
+    print('Saved 1D PDF density split plot: {}.'.format(fn))
 
 def get_cumulants(x, pdf_list, reduced=False):
     c1_all = np.sum(x * pdf_list, axis=-1)/norm
@@ -322,7 +354,11 @@ def plot_pdf2D(x, mean_hist, std_hist, plot='mean_hist', cbar_label=None, xlim=N
             plt.contour(xmid, xmid, to_plot[plot], levels=levels, colors='lightgrey', alpha=0.5, linestyles={'dotted'})
     
     if show_contours:
-        plt.contour(xmid, xmid, to_plot['mean_hist'], levels=levels, colors='lightgrey', alpha=0.5)
+        plt.contour(xmid, xmid, to_plot['mean_hist'], levels=levels, colors='red', alpha=0.2)
+        if models is not None:
+            colors = {'ldt': 'dodgerblue', 'lognormal': 'purple'}
+            for m in models.keys():
+                plt.contour(xmid, xmid, to_plot[m], levels=levels, alpha=0.6, colors=colors[m])
 
     if sep is not None:
         plt.plot([], [], label=r'$s = {:.0f} \; \mathrm{{Mpc}}/h$'.format(sep), alpha=0) # for legend
@@ -330,9 +366,12 @@ def plot_pdf2D(x, mean_hist, std_hist, plot='mean_hist', cbar_label=None, xlim=N
         plt.legend()
 
     if model_labels is not None:
-        plt.plot([], [], label=model_labels[plot], alpha=0) # for legend
-        plt.legend()
-            
+        try:
+            plt.plot([], [], label=model_labels[plot], alpha=0) # for legend
+            plt.legend()
+        except:
+            pass
+    
     plt.xlabel(r'$\delta_{R}(\mathbf{r})$')
     plt.ylabel(r'$\delta_{R}(\mathbf{r + s})$')
     plt.grid(False)
@@ -341,7 +380,7 @@ def plot_pdf2D(x, mean_hist, std_hist, plot='mean_hist', cbar_label=None, xlim=N
     
     fig = plt.gcf()
     fig.subplots_adjust(left=0.1, right=1, bottom=0.1)
-    cax = plt.axes((1., 0.195, 0.03, 0.74))
+    cax = plt.axes((1., 0.2, 0.03, 0.72))
     cbar = fig.colorbar(image, cax=cax)
     #cax.ticklabel_format(style='sci', scilimits=(-2, 2))
     cbar.set_label(cbar_label, rotation=90)
@@ -407,7 +446,7 @@ def plot_density_splits(x, mean_ds, std_ds, std_ds_ref=None, data_style=None, da
                         ax1.plot(xmodel, (model_ds - mean_ds_interp), color=colors[ds], ls='-')
                         ax1.set_ylim(-0.001, 0.001)
 
-        #ax0.set_ylim(-45, 50)
+        #ax0.set_ylim(-40, 60)
         if nells > 1:
             ax0.set_title(r'$\ell = {}$'.format(ell))
         ax1.set_xlabel(r'$s$ [$h^{-1}\mathrm{Mpc}$]')
@@ -466,10 +505,19 @@ if __name__ == '__main__':
     parser.add_argument('--size', type=int, required=False, default=None)
     parser.add_argument('--rescale_var', type=float, required=False, default=1)
     parser.add_argument('--lognormal_shotnoise', type=bool, required=False, default=True)
-    parser.add_argument('--to_plot', type=str, nargs='+', required=False, default=['pdf1D', 'bias', 'pdf2D', 'densitysplits'], choices=['pdf1D', 'shotnoise', 'pdf1D_cov', 'bias', 'pdf2D', 'densitysplits'])
+    parser.add_argument('--to_plot', type=str, nargs='+', required=False, default=['pdf1D', 'bias', 'pdf2D', 'densitysplits'], choices=['pdf1D', 'shotnoise', 'pdf1D_cov', 'bias', 'pdf2D', 'densitysplits', 'splitbins'])
     parser.add_argument('--residuals', type=str, required=False, default='absolute', choices=['absolute', 'sigmas', 'percent'])
-    
+    parser.add_argument('--fontsize', type=int, default=12)
+    parser.add_argument('--linewidth', type=float, default=1.2)
     args = parser.parse_args()
+
+    mpl.rcParams['axes.labelsize'] = args.fontsize
+    mpl.rcParams['legend.fontsize'] = args.fontsize
+    mpl.rcParams['legend.title_fontsize'] = args.fontsize
+    mpl.rcParams['xtick.labelsize'] = args.fontsize
+    mpl.rcParams['ytick.labelsize'] = args.fontsize
+    mpl.rcParams['lines.linewidth'] = args.linewidth
+
     z = args.redshift
     ells = [0, 2, 4] if args.rsd else [0]
     nells = len(ells)
@@ -477,7 +525,7 @@ if __name__ == '__main__':
     interpolate = False
 
     # Plotting
-    if (args.nbar <= 0.0001) &  (np.min(args.smoothing_radius) < 20):
+    if (args.nbar <= 0.0001) & (np.min(args.smoothing_radius) < 20):
         data_style = dict(marker="o", ls='', ms=2.6, elinewidth=0.9, markeredgewidth=0.9, color='C0', mfc='white', mec='C0')
         model_styles = {'ldt': dict(color='C1', ls='', marker="o", ms=2.6, mec='C1', markeredgewidth=0.9, mfc='C1'),
                         'lognormal': dict(color='C3', ls='', marker="o", ms=2.6, mec='C3', markeredgewidth=0.9, mfc='white')}
@@ -486,7 +534,7 @@ if __name__ == '__main__':
         model_styles = {'ldt': dict(ls='-', color='C1'),
                         'ldt_noshotnoise': dict(ls=':', color='C1'),
                         'lognormal': dict(ls=':', color='C3'),
-                        'lognormal_approx': dict(ls='--', color='C3')}        
+                        'lognormal_approx': dict(ls='--', color='C3')} 
 
     data_label = 'AbacusSummit'
     model_labels = {'ldt': 'LDT',
@@ -644,6 +692,17 @@ if __name__ == '__main__':
                 plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF_LDT_shotnoise.pdf'
                 plot_pdf1D_shotnoise(result.pdf1D_x, xlim=xlim, rebin=rebin, models=models_pdf1D, rtitle=args.nbar<0.001, fn=os.path.join(plots_dir, plot_name), **plotting)
 
+        if 'splitbins' in args.to_plot:
+            maxpdf = result.pdf1D_x[np.argmax(mean_pdf1D)]
+            xlim=(maxpdf-5*sigma, maxpdf+5*sigma)
+            density_name = sim_name + '_cellsize{:d}_resampler{}{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '', '_rsd' if args.rsd else '')
+            base_colors = ['cornflowerblue', '#ddb2c4', 'red']
+            cmap = LinearSegmentedColormap.from_list("mycmap", base_colors, N=result.nsplits)
+            colors = [cmap(i) for i in range(result.nsplits)]
+            plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_1DPDF_{}.pdf'
+            plot_split_pdf1D(result.pdf1D_x, mean_pdf1D, xlim=xlim, bins=None, fn=os.path.join(plots_dir, plot_name.format('nosplit')))
+            plot_split_pdf1D(result.pdf1D_x, mean_pdf1D, xlim=xlim, bins=result.bins, colors=colors, fn=os.path.join(plots_dir, plot_name.format('splitbins')))
+
         if 'pdf1D_cov' in args.to_plot:
             # Plot 1D PDF
             density_name = sim_name + '_cellsize{:d}_resampler{}{}{}{}'.format(args.cellsize, args.resampler, '_smoothingR{:d}'.format(smoothing_radius) if smoothing_radius is not None else '', '_rescaledvar{}'.format(args.rescale_var) if args.rescale_var!=1 else '', '_rsd' if args.rsd else '')
@@ -726,7 +785,7 @@ if __name__ == '__main__':
             show_contours = True
 
             for sep in result.hist2D.keys():
-                if float(sep) in [20, 40, 70]:
+                if float(sep) in [40]:
                     mean_hist = np.mean(result.hist2D[sep], axis=0)
                     std_hist = np.std(result.hist2D[sep], axis=0)
                     
@@ -749,8 +808,9 @@ if __name__ == '__main__':
                     prelabel = r'$\delta_R(\mathbf{r + s})$' if delta_mul else ''
                     
                     # Plot 2D PDF
+                    models = {'ldt': prefac*ldtmodelpdf2D, 'lognormal': prefac*lognormalmodelpdf2D}
                     plot_name = base_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_rsd' if args.rsd else '' + '_s{:.0f}_hist2D_mean.pdf'.format(float(sep))
-                    plot_pdf2D(result.hist2D_x[sep], prefac*mean_hist, np.abs(prefac)*std_hist, plot='mean_hist', cbar_label=prelabel+r'$\mathcal{P}$', xlim=xlim, sep=float(sep), fn=os.path.join(plots_dir, plot_name))
+                    plot_pdf2D(result.hist2D_x[sep], prefac*mean_hist, np.abs(prefac)*std_hist, plot='mean_hist', cbar_label=prelabel+r'$\mathcal{P}$', xlim=xlim, sep=float(sep), models=models, model_labels=model_labels, fn=os.path.join(plots_dir, plot_name))
                         
                     vmax = np.max([np.nanmax(np.abs(prefac)*std_hist), np.nanmax(np.abs(prefac*(ldtmodelpdf2D-mean_hist))), np.nanmax(np.abs(prefac*(lognormalmodelpdf2D-mean_hist)))])
        

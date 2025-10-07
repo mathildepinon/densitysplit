@@ -535,7 +535,7 @@ class LDTDensitySplitModel(LDT):
         if bias_model in ['gaussian', 'eulerian']:
             tracer_norm = np.sum((xvals-1)*density_pdf*bias)/self.norm
         else:
-            tracern_norm = 1
+            tracer_norm = 1
         print('bias shape: ', bias.shape)
         if bias.ndim > 1:
             toint = bias * density_pdf[:, None]

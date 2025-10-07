@@ -502,7 +502,7 @@ class DensitySplit(BaseClass):
                     split_weights_in_cut = weights[split_dir1_in_cut]
                     w = (split_weights_in_cut/np.max(split_weights_in_cut))*50000./self.boxsize
                 else:
-                    w = 2000./self.boxsize
+                    w = 200./self.boxsize
 
                 ax.scatter(split_dir2_cut, split_dir3_cut, s=w, color=colors[i], alpha=0.5, label='DS{}'.format(self.split_labels[i]))
 
@@ -511,21 +511,25 @@ class DensitySplit(BaseClass):
                 weights_in_cut = weights[dir1_in_cut]
                 w = (weights_in_cut/np.max(weights_in_cut))*50000./self.boxsize
             else:
-                w = 2000./self.boxsize
+                w = 4#200./self.boxsize
 
             if density:
-                c = ax.scatter(dir2_cut, dir3_cut, s=w, alpha=0.5, c=self.data_densities[dir1_in_cut], cmap=cmap)
-                cbar = fig.colorbar(c, ax=ax)
-                cbar.set_label('$\delta_R$', rotation=90)
+                sort_idx = np.argsort(self.data_densities[dir1_in_cut])
+                alphamax = 1 + np.max(self.data_densities[dir1_in_cut][sort_idx])
+                alpha = (1+self.data_densities[dir1_in_cut][sort_idx])/alphamax
+                c = ax.scatter(dir2_cut[sort_idx], dir3_cut[sort_idx], s=w, alpha=0.8, c=self.data_densities[dir1_in_cut][sort_idx], cmap=cmap, marker='.', edgecolors='none', vmax=3)
+                #c = ax.scatter(dir2_cut[sort_idx], dir3_cut[sort_idx], s=2, alpha=0.3, color='C0', edgecolors='none')
+                #cbar = fig.colorbar(c, ax=ax)
+                #cbar.set_label('$\delta_R$', rotation=0)
             else:
-                ax.scatter(dir2_cut, dir3_cut, s=w, alpha=0.5, color=color)
+                ax.scatter(dir2_cut, dir3_cut, s=2, alpha=0.2, color=color, edgecolors='none')
 
-        ax.set_xlabel(plot_directions[0]+' [Mpc/h]')
-        ax.set_ylabel(plot_directions[1]+' [Mpc/h]')
+        ax.set_xlabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[0]))
+        ax.set_ylabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[1]))
         ax.set_aspect('equal', adjustable='box')
 
 
-    def show_density_map(self, fig, ax, cut_direction, cut_idx, cmap=mpl.cm.viridis, show_halos=False, positions=None, weights=None, split=False):
+    def show_density_map(self, fig, ax, cut_direction, cut_idx, cmap=mpl.cm.viridis, show_halos=False, positions=None, weights=None, split=False, log=False):
 
         cut_directions_dict = {'x': 0, 'y': 1, 'z': 2}
         plot_directions = [key for key, value in cut_directions_dict.items() if key != cut_direction]
@@ -535,11 +539,16 @@ class DensitySplit(BaseClass):
         density_mesh_cut = self.density_mesh[tuple(cut)]
 
         extent = self.offset, self.offset + self.boxsize, self.offset, self.offset + self.boxsize
-        c = ax.imshow(density_mesh_cut.T, cmap=cmap, extent=extent, origin='lower')
-        ax.set_xlabel(plot_directions[0]+' [Mpc/h]')
-        ax.set_ylabel(plot_directions[1]+' [Mpc/h]')
+        if log:
+            c = ax.imshow(np.log(1.5+density_mesh_cut.T), cmap=cmap, extent=extent, origin='lower')
+            label = '$\rm{ln}(1+\delta_R$)'
+        else:
+            c = ax.imshow(density_mesh_cut.T, cmap=cmap, extent=extent, origin='lower')
+            label = '$\delta_R$'
+        ax.set_xlabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[0]))
+        ax.set_ylabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[1]))
         cbar = fig.colorbar(c, ax=ax)
-        cbar.set_label('$\delta_R$', rotation=90)
+        cbar.set_label(label, rotation=0)
 
         if show_halos:
             self.show_halos_map(fig, ax, self.cellsize, cut_direction, cut_idx, positions=positions, weights=weights, split=split, density=False)
@@ -558,8 +567,8 @@ class DensitySplit(BaseClass):
 
         extent = self.offset, self.offset + self.boxsize, self.offset, self.offset + self.boxsize
         c = ax.imshow(split_mesh_cut.T, cmap=cmap, extent=extent, origin='lower')
-        ax.set_xlabel(plot_directions[0]+' [Mpc/h]')
-        ax.set_ylabel(plot_directions[1]+' [Mpc/h]')
+        ax.set_xlabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[0]))
+        ax.set_ylabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[1]))
 
         # Discrete color bar for splits
         bounds = self.split_bins
@@ -574,18 +583,21 @@ class DensitySplit(BaseClass):
                                 positions=positions, weights=weights, split=split_halos, colors=colors)
 
 
-    def show_randoms_map(self, fig, ax, cellsize, cut_direction, cut_idx, colors):
+    def show_randoms_map(self, fig, ax, cellsize, cut_direction, cut_idx, colors, positions='randoms', norm=None, size=1):
         cut_directions_dict = {'x': 0, 'y': 1, 'z': 2}
         plot_directions = [key for key, value in cut_directions_dict.items() if key != cut_direction]
 
-        split_samples = self.sample_splits('randoms', self.size, seed=42)
+        if positions=='randoms':
+            split_samples = self.sample_splits('randoms', size*self.size, seed=42)
+        else:
+            split_samples = self.sample_splits('mesh', norm=norm)
 
         for i, split_sample in enumerate(split_samples):
             dir2_cut, dir3_cut = utils.get_slice_from_3D_points(split_sample, cut_direction, cut_idx, cellsize, self.boxsize, self.offset, return_indices=False)
-            ax.scatter(dir2_cut, dir3_cut, s=3, color=colors[i], alpha=0.5, label='DS{}'.format(self.split_labels[i]))
+            ax.scatter(dir2_cut, dir3_cut, s=1, color=colors[i], alpha=1, label='DS{}'.format(self.split_labels[i]), edgecolors='none')
 
-        ax.set_xlabel(plot_directions[0]+' [Mpc/h]')
-        ax.set_ylabel(plot_directions[1]+' [Mpc/h]')
+        ax.set_xlabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[0]))
+        ax.set_ylabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[1]))
         ax.set_aspect('equal', adjustable='box')
 
 

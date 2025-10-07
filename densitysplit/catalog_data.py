@@ -98,11 +98,11 @@ class Data:
             weights_in_cut = self.weights[dir1_in_cut]
             w = (weights_in_cut/np.max(weights_in_cut))*50000./self.boxsize
         else:
-            w = 2000./self.boxsize
+            w = 0.3#2000./self.boxsize
 
-        ax.scatter(dir2_cut, dir3_cut, s=w, alpha=0.5, **kwargs)
-        ax.set_xlabel(plot_directions[0]+' [Mpc/h]')
-        ax.set_ylabel(plot_directions[1]+' [Mpc/h]')
+        ax.scatter(dir2_cut, dir3_cut, s=w, alpha=0.2, **kwargs)
+        ax.set_xlabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[0]))
+        ax.set_ylabel(r'${} \; [h^{{-1}}\rm Mpc]$'.format(plot_directions[1]))
         ax.set_aspect('equal', adjustable='box')
 
         

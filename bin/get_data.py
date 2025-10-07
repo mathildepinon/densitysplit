@@ -29,7 +29,7 @@ path_to_sim = [path_to_sim1,
 
 catalog_names = ['AbacusSummit_1Gpc_z1.175',
                  'AbacusSummit_2Gpc_z1.175_ph0{:02d}',
-                 'AbacusSummit_2Gpc_z0.800',
+                 'AbacusSummit_2Gpc_z0.800_ph0{:02d}',
                  'AbacusSummit_1Gpc_z0.8-1.1',
                  'AbacusSummit_2Gpc_ELG_z0.950_ph0{:02d}',
                  'AbacusSummit_2Gpc_LRG_z0.800_ph0{:02d}',
@@ -99,9 +99,12 @@ def apply_rsd(cat, z, boxsize, H_0=100, los='z', vsmear=None, cosmo=None):
     pos_rsd = [cat[p] % boxsize if p !=los else (cat[p] + (cat['v'+p] + np.random.normal(0,vsmear, size=len(cat[p])))*rsd_factor) %boxsize if vsmear is not None else (cat[p] + cat['v'+p]*rsd_factor) %boxsize for p in 'xyz']
     return pos_rsd
 
-sim = 6
+sim = 2
+phase = 0
 mass_cut = 500 #for halos
 
-for phase in np.arange(11, 25):
-    get_galaxies(path_to_sim[sim].format(phase), catalog_names[sim].format(phase), sim_boxsizes[sim], sim_z[sim])
+get_halos(path_to_sim[sim].format(phase), catalog_names[sim].format(phase)+'_nocut', sim_boxsizes[sim], sim_z[sim], mass_cut=None)
+
+#for phase in np.arange(11, 25):
+#    get_galaxies(path_to_sim[sim].format(phase), catalog_names[sim].format(phase), sim_boxsizes[sim], sim_z[sim])
   

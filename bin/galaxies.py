@@ -99,7 +99,7 @@ def plot_bias_relation(x, y, err=None, xlim=None, data='average', rescale_errorb
             if xlim is not None:
                 models[m] = models[m][mask]
                 
-            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m], zorder=10 if data=='average' else 0)
+            axes[0].plot(x, models[m], label=model_labels[m], **model_styles[m])
             axes[1].plot(x, (models[m] - y)/err, **model_styles[m])
 
     axes[1].ticklabel_format(style='sci', scilimits=(-3, 3))
@@ -319,7 +319,7 @@ if __name__ == '__main__':
     print('vmax:', vmax)
 
     plot_name = density_name.format('ph0{:02d}'.format(args.imock) if args.imock is not None else '{}mocks'.format(nmocks)) + '_{}_condPDF.pdf'.format(args.tracer)
-    plot_pdf2D(edges, tracer_result.edges, mean_pdf2D/np.mean(pdf_matter, axis=0)[:, None], cbar_label=r'$\mathcal{P}(\delta_{R, m} | \delta_{R, g})$', xlim=(-1, 3), vmax=vmax, fn=os.path.join(plots_dir, plot_name))
+    plot_pdf2D(edges, tracer_result.edges, mean_pdf2D/np.mean(pdf_matter, axis=0)[:, None], cbar_label=r'$\mathcal{P}(\delta_{R, m} | \delta_{R, g})$', xlim=(-1, 2), vmax=vmax, fn=os.path.join(plots_dir, plot_name))
         
     # tracer
     # LDT model
